@@ -1169,8 +1169,12 @@ $.extend($E, {
                 //计算margin-top，让modal紧靠在$txt上面
                 var txtTop = editor.$txtContainer.offset().top,
                     modalContainerTop = $modal.offset().top;
-
-                $modal.css('margin-top', txtTop - modalContainerTop + 5);
+                if (editor.centerModal) {
+                    $modal.css('margin-top', (window.innerHeight - $modal.outerHeight()) * 0.5);
+                }
+                else {
+                    $modal.css('margin-top', txtTop - modalContainerTop + 5);
+                }
 
                 //最后阻止默认时间、阻止冒泡
                 e.preventDefault();
@@ -1262,7 +1266,10 @@ $.extend($E.fn, {
         *   uploadUrl: 'string',  //跨域图片上传的地址
         *   pasteUrl: 'string',  //粘贴图片上传的地址
         *   lang: '...' / {...},  //语言包
-        *   filterJs: false   //编辑源码时过滤js，默认为true
+        *   filterJs: false,   //编辑源码时过滤js，默认为true
+        *   centerModal: false //弹出框是否居中显示，默认为false
+        *   extraMenus: {...}   //配置自定义功能按钮
+        *   extraCommandHooks: {...}    //配置自定义功能按钮的事件处理函数
         * }
         */
 
@@ -1275,6 +1282,9 @@ $.extend($E.fn, {
             pasteUrl = options.pasteUrl,
             lang = options.lang,
             filterJs = options.filterJs,
+            centerModal = options.centerModal,
+            extraMenus = options.extraMenus,
+            extraCommandHooks = options.extraCommandHooks,
 
             //editor
             editor = this,
@@ -1288,6 +1298,7 @@ $.extend($E.fn, {
             id = $E.getUniqeId();
         }
         editor.id = id;
+        editor.centerModal = centerModal;
 
         //创建基础DOM实体对象，并组合
         editor.$editorContainer = $( $E.htmlTemplates.editorContainer );
@@ -1384,6 +1395,20 @@ $.extend($E.fn, {
         //初始化menus
         editor.initMenus();
         editor.initMenuConfig();
+
+        //配置ExtraMenus
+        if (extraMenus && (extraMenus instanceof Object) === true) {
+            for (var menu in extraMenus) {
+                editor.menus[menu] = extraMenus[menu];
+            }
+        }
+
+        //配置ExtraCommandHooks
+        if (extraCommandHooks && (extraCommandHooks instanceof Object) === true) {
+            for (var hook in extraCommandHooks) {
+                editor.commandHooks[hook] = extraCommandHooks[hook];
+            }
+        }
         
         //配置menuConfig
         if(menuConfig && (menuConfig instanceof Array) === true && (menuConfig[0] instanceof Array) === true){  //需要确定menuConfig是二维数组才行
@@ -2339,7 +2364,7 @@ $.extend($E.fn, {
 },
 'createLink': {
     'title': langMenus.createLink.title,
-    'type': 'modal', 
+    'type': 'modal',
     'cssClass': 'wangeditor-menu-img-link',
     'modal': function (editor) {
         var urlTxtId = $E.getUniqeId(),
@@ -2351,13 +2376,13 @@ $.extend($E.fn, {
             langLink = langModal.link,
             langTitle = langModal.title,
             langBlank = langModal.blank,
-            
+
             langBtn = langCommon.insert,
 
             langUnsafe = langCommon.unsafeAlert;
 
-        var content = '<p>' +langLink+ '：<input id="' + urlTxtId + '" type="text" style="width:300px;"  placeholder="http://"/></p>' +
-                        '<p>' +langTitle+ '：<input id="' + titleTxtId + '" type="text" style="width:300px;"/></p>' + 
+        var content = '<p>' +langLink+ '：<input id="' + urlTxtId + '" type="text" style="max-width:300px;" placeholder="http://"/></p>' +
+                        '<p>' +langTitle+ '：<input id="' + titleTxtId + '" type="text" style="max-width:300px;" /></p>' +
                         '<p>' +langBlank+ '：<input id="' + blankCheckId + '" type="checkbox" checked="checked"/></p>' +
                         '<p><button id="' + btnId + '" type="button" class="wangEditor-modal-btn">' +langBtn+ '</button></p>',
             $link_modal = $(
@@ -2754,8 +2779,8 @@ $.extend($E.fn, {
                         '   <a href="#" id="' + changeLinkId + '"></a>' +
                         '</p>' +
                         '<div id="' + webImgContainerId + '">' +
-                        '   <p>' +langUrl+ '：<input id="' + urlTxtId + '" type="text" style="width:300px;" placeholder="http://"/></p>' +
-                        '   <p>' +langTitle+ '：<input id="' + titleTxtId + '" type="text" style="width:300px;"/></p>' +
+                        '   <p>' +langUrl+ '：<input id="' + urlTxtId + '" type="text" style="max-width:300px;" placeholder="http://"/></p>' +
+                        '   <p>' +langTitle+ '：<input id="' + titleTxtId + '" type="text" style="max-width:300px;"/></p>' +
                         '<p><button id="' + btnId + '" type="button" class="wangEditor-modal-btn">' +langBtn+ '</button></p>' +
                         '</div>',
             $webimg_modal = $(

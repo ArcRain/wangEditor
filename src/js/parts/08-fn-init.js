@@ -11,7 +11,10 @@ $.extend($E.fn, {
         *   uploadUrl: 'string',  //跨域图片上传的地址
         *   pasteUrl: 'string',  //粘贴图片上传的地址
         *   lang: '...' / {...},  //语言包
-        *   filterJs: false   //编辑源码时过滤js，默认为true
+        *   filterJs: false,   //编辑源码时过滤js，默认为true
+        *   centerModal: false //弹出框是否居中显示，默认为false
+        *   extraMenus: {...}   //配置自定义功能按钮
+        *   extraCommandHooks: {...}    //配置自定义功能按钮的事件处理函数
         * }
         */
 
@@ -24,6 +27,9 @@ $.extend($E.fn, {
             pasteUrl = options.pasteUrl,
             lang = options.lang,
             filterJs = options.filterJs,
+            centerModal = options.centerModal,
+            extraMenus = options.extraMenus,
+            extraCommandHooks = options.extraCommandHooks,
 
             //editor
             editor = this,
@@ -37,6 +43,7 @@ $.extend($E.fn, {
             id = $E.getUniqeId();
         }
         editor.id = id;
+        editor.centerModal = centerModal;
 
         //创建基础DOM实体对象，并组合
         editor.$editorContainer = $( $E.htmlTemplates.editorContainer );
@@ -133,6 +140,20 @@ $.extend($E.fn, {
         //初始化menus
         editor.initMenus();
         editor.initMenuConfig();
+
+        //配置ExtraMenus
+        if (extraMenus && (extraMenus instanceof Object) === true) {
+            for (var menu in extraMenus) {
+                editor.menus[menu] = extraMenus[menu];
+            }
+        }
+
+        //配置ExtraCommandHooks
+        if (extraCommandHooks && (extraCommandHooks instanceof Object) === true) {
+            for (var hook in extraCommandHooks) {
+                editor.commandHooks[hook] = extraCommandHooks[hook];
+            }
+        }
         
         //配置menuConfig
         if(menuConfig && (menuConfig instanceof Array) === true && (menuConfig[0] instanceof Array) === true){  //需要确定menuConfig是二维数组才行

@@ -29,8 +29,8 @@
                         '   <a href="#" id="' + changeLinkId + '"></a>' +
                         '</p>' +
                         '<div id="' + webImgContainerId + '">' +
-                        '   <p>' +langUrl+ '：<input id="' + urlTxtId + '" type="text" style="width:300px;" placeholder="http://"/></p>' +
-                        '   <p>' +langTitle+ '：<input id="' + titleTxtId + '" type="text" style="width:300px;"/></p>' +
+                        '   <p>' +langUrl+ '：<input id="' + urlTxtId + '" type="text" style="max-width:300px;" placeholder="http://"/></p>' +
+                        '   <p>' +langTitle+ '：<input id="' + titleTxtId + '" type="text" style="max-width:300px;"/></p>' +
                         '<p><button id="' + btnId + '" type="button" class="wangEditor-modal-btn">' +langBtn+ '</button></p>' +
                         '</div>',
             $webimg_modal = $(

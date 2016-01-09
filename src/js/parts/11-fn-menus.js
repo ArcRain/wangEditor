@@ -329,7 +329,7 @@ $.extend($E.fn, {
 },
 'createLink': {
     'title': langMenus.createLink.title,
-    'type': 'modal', 
+    'type': 'modal',
     'cssClass': 'wangeditor-menu-img-link',
     'modal': function (editor) {
         var urlTxtId = $E.getUniqeId(),
@@ -341,13 +341,13 @@ $.extend($E.fn, {
             langLink = langModal.link,
             langTitle = langModal.title,
             langBlank = langModal.blank,
-            
+
             langBtn = langCommon.insert,
 
             langUnsafe = langCommon.unsafeAlert;
 
-        var content = '<p>' +langLink+ '：<input id="' + urlTxtId + '" type="text" style="width:300px;"  placeholder="http://"/></p>' +
-                        '<p>' +langTitle+ '：<input id="' + titleTxtId + '" type="text" style="width:300px;"/></p>' + 
+        var content = '<p>' +langLink+ '：<input id="' + urlTxtId + '" type="text" style="max-width:300px;" placeholder="http://"/></p>' +
+                        '<p>' +langTitle+ '：<input id="' + titleTxtId + '" type="text" style="max-width:300px;" /></p>' +
                         '<p>' +langBlank+ '：<input id="' + blankCheckId + '" type="checkbox" checked="checked"/></p>' +
                         '<p><button id="' + btnId + '" type="button" class="wangEditor-modal-btn">' +langBtn+ '</button></p>',
             $link_modal = $(
@@ -744,8 +744,8 @@ $.extend($E.fn, {
                         '   <a href="#" id="' + changeLinkId + '"></a>' +
                         '</p>' +
                         '<div id="' + webImgContainerId + '">' +
-                        '   <p>' +langUrl+ '：<input id="' + urlTxtId + '" type="text" style="width:300px;" placeholder="http://"/></p>' +
-                        '   <p>' +langTitle+ '：<input id="' + titleTxtId + '" type="text" style="width:300px;"/></p>' +
+                        '   <p>' +langUrl+ '：<input id="' + urlTxtId + '" type="text" style="max-width:300px;" placeholder="http://"/></p>' +
+                        '   <p>' +langTitle+ '：<input id="' + titleTxtId + '" type="text" style="max-width:300px;"/></p>' +
                         '<p><button id="' + btnId + '" type="button" class="wangEditor-modal-btn">' +langBtn+ '</button></p>' +
                         '</div>',
             $webimg_modal = $(
