@@ -20,6 +20,7 @@ $.extend($E.fn, {
 
         var //options
             onchange = options.onchange,
+            onReturnKey = options.onReturnKey,
             menuConfig = options.menuConfig,
             expressions = options.expressions,
             uploadImgComponent = options.uploadImgComponent,
@@ -232,6 +233,14 @@ $.extend($E.fn, {
                     e.preventDefault();
                 }
             }
+        }).on('keypress', function (e) {
+            var defaultRet = true;
+            if (onReturnKey && typeof onReturnKey === "function") {
+                if (e.keyCode === 13) {
+                    defaultRet = onReturnKey(e);
+                }
+            }
+            return defaultRet;
         });
 
         //初始化特定元素左上角的删除按钮------------------

@@ -249,7 +249,7 @@ $.extend($E, {
                 //计算margin-top，让modal紧靠在$txt上面
                 var txtTop = editor.$txtContainer.offset().top,
                     modalContainerTop = $modal.offset().top;
-                if (editor.centerModal) {
+                if (Boolean(editor.centerModal)) {
                     $modal.css('margin-top', (window.innerHeight - $modal.outerHeight()) * 0.5);
                 }
                 else {

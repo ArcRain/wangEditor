@@ -32,7 +32,7 @@
             var src = $.trim( $('#' + txtSrcId).val() ), 
                 width = +( $('#' + txtWidthId).val() ),
                 height = +( $('#' + txtHeightId).val() ),
-                reg = /^\s*(http:\/\/|https:\/\/).+(\.swf|\.ogg|\.mp4|\.webm)\s*$/i,
+                reg = /^\s*(http:\/\/|https:\/\/).+(\.swf|\.ogg|\.mp4|\.webm)/i,
                 html,
                 video_callback = function(){
                     $('#' + txtSrcId).val('');
@@ -60,7 +60,7 @@
                 height = defaultHeight;
             }
 
-            if ((/.swf\s*$/i).test(src) === true) {
+            if ((/.swf/i).test(src) === true) {
                 // swf 格式
                 html = $E.htmlTemplates.videoEmbed
                         .replace(/#{vedioUrl}/ig, src)
