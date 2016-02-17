@@ -1169,7 +1169,7 @@ $.extend($E, {
                 //计算margin-top，让modal紧靠在$txt上面
                 var txtTop = editor.$txtContainer.offset().top,
                     modalContainerTop = $modal.offset().top;
-                if (editor.centerModal) {
+                if (Boolean(editor.centerModal)) {
                     $modal.css('margin-top', (window.innerHeight - $modal.outerHeight()) * 0.5);
                 }
                 else {
@@ -1275,6 +1275,7 @@ $.extend($E.fn, {
 
         var //options
             onchange = options.onchange,
+            onReturnKey = options.onReturnKey,
             menuConfig = options.menuConfig,
             expressions = options.expressions,
             uploadImgComponent = options.uploadImgComponent,
@@ -1487,6 +1488,14 @@ $.extend($E.fn, {
                     e.preventDefault();
                 }
             }
+        }).on('keypress', function (e) {
+            var defaultRet = true;
+            if (onReturnKey && typeof onReturnKey === "function") {
+                if (e.keyCode === 13) {
+                    defaultRet = onReturnKey(e);
+                }
+            }
+            return defaultRet;
         });
 
         //初始化特定元素左上角的删除按钮------------------
@@ -2622,7 +2631,7 @@ $.extend($E.fn, {
             var src = $.trim( $('#' + txtSrcId).val() ), 
                 width = +( $('#' + txtWidthId).val() ),
                 height = +( $('#' + txtHeightId).val() ),
-                reg = /^\s*(http:\/\/|https:\/\/).+(\.swf|\.ogg|\.mp4|\.webm)\s*$/i,
+                reg = /^\s*(http:\/\/|https:\/\/).+(\.swf|\.ogg|\.mp4|\.webm)/i,
                 html,
                 video_callback = function(){
                     $('#' + txtSrcId).val('');
@@ -2650,7 +2659,7 @@ $.extend($E.fn, {
                 height = defaultHeight;
             }
 
-            if ((/.swf\s*$/i).test(src) === true) {
+            if ((/.swf/i).test(src) === true) {
                 // swf 格式
                 html = $E.htmlTemplates.videoEmbed
                         .replace(/#{vedioUrl}/ig, src)
