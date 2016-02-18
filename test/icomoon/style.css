@@ -1,10 +1,10 @@
 @font-face {
     font-family: 'icomoon';
-    src:    url('fonts/icomoon.eot?5se0ya');
-    src:    url('fonts/icomoon.eot?5se0ya#iefix') format('embedded-opentype'),
-        url('fonts/icomoon.ttf?5se0ya') format('truetype'),
-        url('fonts/icomoon.woff?5se0ya') format('woff'),
-        url('fonts/icomoon.svg?5se0ya#icomoon') format('svg');
+    src:    url('fonts/icomoon.eot?608gdy');
+    src:    url('fonts/icomoon.eot?608gdy#iefix') format('embedded-opentype'),
+        url('fonts/icomoon.ttf?608gdy') format('truetype'),
+        url('fonts/icomoon.woff?608gdy') format('woff'),
+        url('fonts/icomoon.svg?608gdy#icomoon') format('svg');
     font-weight: normal;
     font-style: normal;
 }
@@ -192,10 +192,31 @@
 .wangeditor-menu-img-libreoffice:before {
     content: "\eade";
 }
+.wangeditor-menu-img-sigma2:before {
+    content: "\ea68";
+}
+.wangeditor-menu-img-search-plus:before {
+    content: "\f00e";
+}
+.wangeditor-menu-img-search-minus:before {
+    content: "\f010";
+}
+.wangeditor-menu-img-trash-o:before {
+    content: "\f014";
+}
+.wangeditor-menu-img-align-justify:before {
+    content: "\f039";
+}
+.wangeditor-menu-img-arrows-v:before {
+    content: "\f07d";
+}
 .wangeditor-menu-img-desktop:before {
     content: "\f108";
 }
 .wangeditor-menu-img-tablet:before {
     content: "\f10a";
+}
+.wangeditor-menu-img-omega:before {
+    content: "\e900";
 }
 
