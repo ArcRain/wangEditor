@@ -1,19 +1,26 @@
-var define;
-
 (function (factory) {
-    if (typeof define === 'function') {
-        if (define.amd) {
+    if (typeof window.define === 'function') {
+        if (window.define.amd) {
             // AMD模式
-            define('wangEditor', ["jquery"], factory);
-        } else if (define.cmd) {
+            window.define('wangEditor', ["jquery"], factory);
+        } else if (window.define.cmd) {
             // CMD模式
-            define(function (require, exports, module) {
+            window.define(function (require, exports, module) {
                 return factory;
             });
         } else {
             // 全局模式
             factory(window.jQuery);
         }
+    } else if (typeof module === "object" && typeof module.exports === "object") {
+        // commonjs
+
+        // 引用 css —— webapck
+        window.wangEditorCssPath ? require(window.wangEditorCssPath) : require('../css/wangEditor.css');
+        module.exports = factory(
+            // 传入 jquery ，支持使用 npm 方式或者自己定义jquery的路径
+            window.wangEditorJQueryPath ? require(window.wangEditorJQueryPath) : require('jquery')
+        );
     } else {
         // 全局模式
         factory(window.jQuery);
@@ -43,10 +50,14 @@ var define;
     }
 
     // 编辑器（整体）构造函数
-    var E = function (elemId) {
+    var E = function (elem) {
+        // 支持 id 和 element 两种形式
+        if (typeof elem === 'string') {
+            elem = '#' + elem;
+        }
 
         // ---------------获取基本节点------------------
-        var $elem = $('#' + elemId);
+        var $elem = $(elem);
         if ($elem.length !== 1) {
             return;
         }
@@ -68,7 +79,6 @@ var define;
 
     E.fn = E.prototype;
 
-
     E.$body = $('body');
     E.$document = $(document);
     E.$window = $(window);
@@ -76,8 +86,8 @@ var define;
     E.getComputedStyle = window.getComputedStyle;
     E.w3cRange = typeof document.createRange === 'function';
     E.hostname = location.hostname.toLowerCase();
-    E.websiteHost = 'wangeditor.github.io';
-    E.isOnWebsite = E.hostname === E.websiteHost;
+    E.websiteHost = 'wangeditor.github.io|www.wangeditor.com|wangeditor.coding.me';
+    E.isOnWebsite = E.websiteHost.indexOf(E.hostname) >= 0;
     E.docsite = 'http://www.kancloud.cn/wangfupeng/wangeditor2/113961';
 
     // 暴露给全局对象
@@ -166,7 +176,6 @@ _e(function (E, $) {
         var $valueContainer = editor.$valueContainer;
         var currentValue = '';
         var nodeName = editor.valueNodeName;
-
         if (nodeName === 'div') {
             currentValue = $valueContainer.html();
         } else if (nodeName === 'textarea') {
@@ -338,9 +347,14 @@ _e(function (E, $) {
             return;
         }
 
-        selection = document.getSelection();
-        selection.removeAllRanges();
-        selection.addRange(range);
+        // 使用 try catch 来防止 IE 某些情况报错
+        try {
+            selection = document.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+        } catch (ex) {
+            E.error('执行 editor.restoreSelection 时，IE可能会有异常，不影响使用');
+        }
     };
 
     // 根据elem恢复选区
@@ -641,6 +655,9 @@ _e(function (E, $) {
         // 最后插入空行
         editor.txt.insertEmptyP();
 
+        // 包裹暴露的img和text
+        editor.txt.wrapImgAndText();
+
         // 更新内容
         editor.updateValue();
 
@@ -773,23 +790,52 @@ _e(function (E, $) {
 // undo redo
 _e(function (E, $) {
 
-    var redoList = [];
-    var undoList = [];
     var length = 20;  // 缓存的最大长度
+    function _getRedoList(editor) {
+        if (editor._redoList == null) {
+            editor._redoList = [];
+        }
+        return editor._redoList;
+    }
+    function _getUndoList(editor) {
+        if (editor._undoList == null) {
+            editor._undoList = [];
+        }
+        return editor._undoList;
+    }
 
     // 数据处理
-    function _handle(editor, data) {
+    function _handle(editor, data, type) {
         // var range = data.range;
         // var range2 = range.cloneRange && range.cloneRange();
         var val = data.val;
+        var html = editor.txt.$txt.html();
 
         if(val == null) {
             return;
         }
 
+        if (val === html) {
+            if (type === 'redo') { 
+                editor.redo();
+                return;
+            } else if (type === 'undo') {
+                editor.undo();
+                return;
+            } else {
+                return;
+            }
+        }
+
         // 保存数据
         editor.txt.$txt.html(val);
+        // 更新数据到textarea（有必要的话）
         editor.updateValue();
+
+        // onchange 事件
+        if (editor.onchange && typeof editor.onchange === 'function') {
+            editor.onchange.call(editor);
+        }
 
         // ?????
         // 注释：$txt 被重新赋值之后，range会被重置，cloneRange() 也不好使
@@ -804,9 +850,11 @@ _e(function (E, $) {
         var editor = this;
         var $txt = editor.txt.$txt;
         var val = $txt.html();
+        var undoList = _getUndoList(editor);
+        var redoList = _getRedoList(editor);
         var currentVal = undoList.length ? undoList[0] : '';
 
-        if (val === currentVal) {
+        if (val === currentVal.val) {
             return;
         }
 
@@ -818,7 +866,7 @@ _e(function (E, $) {
         // 添加数据到 undoList
         undoList.unshift({
             range: editor.currentRange(),  // 将当前的range也记录下
-            val: $txt.html()
+            val: val
         });
 
         // 限制 undoList 长度
@@ -829,6 +877,10 @@ _e(function (E, $) {
 
     // undo 操作
     E.fn.undo = function () {
+        var editor = this;
+        var undoList = _getUndoList(editor);
+        var redoList = _getRedoList(editor);
+
         if (!undoList.length) {
             return;
         }
@@ -838,11 +890,14 @@ _e(function (E, $) {
         redoList.unshift(data);
 
         // 并修改编辑器的内容
-        _handle(this, data);
+        _handle(this, data, 'undo');
     };
 
     // redo 操作
     E.fn.redo = function () {
+        var editor = this;
+        var undoList = _getUndoList(editor);
+        var redoList = _getRedoList(editor);
         if (!redoList.length) {
             return;
         }
@@ -852,7 +907,7 @@ _e(function (E, $) {
         undoList.unshift(data);
 
         // 并修改编辑器的内容
-        _handle(this, data);
+        _handle(this, data, 'redo');
     };
 });
 // 暴露给用户的 API
@@ -861,6 +916,14 @@ _e(function (E, $) {
     // 创建编辑器
     E.fn.create = function () {
         var editor = this;
+
+        // 检查 E.$body 是否有值
+        // 如果在 body 之前引用了 js 文件，body 尚未加载，可能没有值
+        if (!E.$body || E.$body.length === 0) {
+            E.$body = $('body');
+            E.$document = $(document);
+            E.$window = $(window);
+        }
 
         // 执行 addMenus 之前：
         // 1. 允许用户修改 editor.UI 自定义配置UI
@@ -885,6 +948,9 @@ _e(function (E, $) {
         // 初始化选区
         editor.initSelection();
 
+        // $txt 快捷方式
+        editor.$txt = editor.txt.$txt;
+
         // 执行用户自定义事件，通过 E.ready() 添加
         var _plugins = E._plugins;
         if (_plugins && _plugins.length) {
@@ -892,9 +958,6 @@ _e(function (E, $) {
                 val.call(editor);
             });
         }
-
-        // $txt 快捷方式
-        editor.$txt = editor.txt.$txt;
     };
 
     // 禁用编辑器
@@ -950,6 +1013,14 @@ _e(function (E, $) {
             $valueContainer.hide();
             $editorContainer.show();
         }
+    };
+
+    // 清空内容的快捷方式
+    E.fn.clear = function () {
+        var editor = this;
+        var $txt = editor.txt.$txt;
+        $txt.html('<p><br></p>');
+        editor.restoreSelectionByElem($txt.find('p').get(0));
     };
 
 });
@@ -1145,13 +1216,17 @@ _e(function (E, $) {
         // 计算 tip 宽度
         var $tempDiv;
         if (!self.tipWidth) {
-            $tempDiv = $('<p style="opacity:0; filter:Alpha(opacity=0); position:absolute;">' + title + '</p>');
-            editor.$editorContainer.append($tempDiv);
+            // 设置一个纯透明的 p（absolute;top:-10000px;不会显示在内容区域）
+            // 内容赋值为 title ，为了计算tip宽度
+            $tempDiv = $('<p style="opacity:0; filter:Alpha(opacity=0); position:absolute;top:-10000px;">' + title + '</p>');
+            // 先添加到body，计算完再 remove
+            E.$body.append($tempDiv);
             editor.ready(function () {
                 var editor = this;
                 var titleWidth = $tempDiv.outerWidth() + 5; // 多出 5px 的冗余
                 var currentWidth = $tip.outerWidth();
                 var currentMarginLeft = parseFloat($tip.css('margin-left'), 10);
+                // 计算完，拿到数据，则弃用
                 $tempDiv.remove();
                 $tempDiv = null;
 
@@ -1383,6 +1458,10 @@ _e(function (E, $) {
         // 为了执行 editor.commandForElem 而传入的elem查询方式
         this.selectorForELemCommand = opt.selectorForELemCommand;
 
+        // 执行事件前后的钩子
+        this.beforeEvent = opt.beforeEvent;
+        this.afterEvent = opt.afterEvent;
+
         // 初始化
         this.init();
     };
@@ -1439,9 +1518,17 @@ _e(function (E, $) {
         var selectorForELemCommand = self.selectorForELemCommand;
         var $list = self.$list;
 
-        $list.on('click', 'a[commandValue]', function (e) {
-            // 执行命令
+        // 执行事件前后的钩子函数
+        var beforeEvent = self.beforeEvent;
+        var afterEvent = self.afterEvent;
 
+        $list.on('click', 'a[commandValue]', function (e) {
+            // 正式命令执行之前
+            if (beforeEvent && typeof beforeEvent === 'function') {
+                beforeEvent.call(e);
+            }
+
+            // 执行命令
             var commandValue = $(e.currentTarget).attr('commandValue');
             if (menu.selected && editor.isRangeEmpty() && selectorForELemCommand) {
                 // 当前处于选中状态，并且选中内容为空
@@ -1449,6 +1536,11 @@ _e(function (E, $) {
             } else {
                 // 当前未处于选中状态，或者有选中内容。则执行默认命令
                 editor.command(e, commandName, commandValue);
+            }
+
+            // 正式命令之后的钩子
+            if (afterEvent && typeof afterEvent === 'function') {
+                afterEvent.call(e);
             }
         });
     };
@@ -1461,6 +1553,9 @@ _e(function (E, $) {
         var thisList = self.$list.get(0);
 
         E.$body.on('click', function (e) {
+            if (!self.isShowing) {
+                return;
+            }
             var trigger = e.target;
 
             // 获取菜单elem
@@ -1487,6 +1582,10 @@ _e(function (E, $) {
         });
 
         E.$window.scroll(function () {
+            self.hide();
+        });
+
+        E.$window.on('resize', function () {
             self.hide();
         });
     };
@@ -1516,6 +1615,7 @@ _e(function (E, $) {
         var $list = self.$list;
         var editor = self.editor;
         var menu = self.menu;
+        var $menuContainer = editor.menuContainer.$menuContainer;
         var $menuDom = menu.selected ? menu.$domSelected : menu.$domNormal;
         // 注意这里的 offsetParent() 要返回 .menu-item 的 position
         // 因为 .menu-item 是 position:relative
@@ -1546,13 +1646,22 @@ _e(function (E, $) {
         if (valWithTxt > -10) {
             marginLeft = marginLeft - valWithTxt - 10;
         }
-
         // 设置样式
         $list.css({
             top: top,
             left: left,
             'margin-left': marginLeft
         });
+
+        // 如果因为向下滚动而导致菜单fixed，则再加一步处理
+        if (editor._isMenufixed) {
+            top = top + (($menuContainer.offset().top + $menuContainer.outerHeight()) - $list.offset().top);
+
+            // 重新设置top
+            $list.css({
+                top: top
+            });
+        }
     };
 
     // 显示
@@ -1609,6 +1718,7 @@ _e(function (E, $) {
         this.$content = opt.$content;
         this.width = opt.width || 200;
         this.height = opt.height;
+        this.onRender = opt.onRender;
 
         // init
         this.init();
@@ -1664,6 +1774,9 @@ _e(function (E, $) {
         var thisPanle = self.$panel.get(0);
 
         E.$body.on('click', function (e) {
+            if (!self.isShowing) {
+                return;
+            }
             var trigger = e.target;
 
             // 获取菜单elem
@@ -1689,7 +1802,11 @@ _e(function (E, $) {
             self.hide();
         });
 
-        E.$window.scroll(function () {
+        E.$window.scroll(function (e) {
+            self.hide();
+        });
+
+        E.$window.on('resize', function () {
             self.hide();
         });
     };
@@ -1703,11 +1820,15 @@ _e(function (E, $) {
     // 渲染
     DropPanel.fn._render = function () {
         var self = this;
+        var onRender = self.onRender;
         var editor = self.editor;
         var $panel = self.$panel;
 
         // 渲染到页面
         editor.$editorContainer.append($panel);
+
+        // 渲染后的回调事件
+        onRender && onRender.call(self);
 
         // 记录状态
         self.rendered = true;
@@ -1719,6 +1840,7 @@ _e(function (E, $) {
         var $panel = self.$panel;
         var $triangle = self.$triangle;
         var editor = self.editor;
+        var $menuContainer = editor.menuContainer.$menuContainer;
         var menu = self.menu;
         var $menuDom = menu.selected ? menu.$domSelected : menu.$domNormal;
         // 注意这里的 offsetParent() 要返回 .menu-item 的 position
@@ -1763,6 +1885,16 @@ _e(function (E, $) {
             left: left,
             'margin-left': marginLeft
         });
+
+        // 如果因为向下滚动而导致菜单fixed，则再加一步处理
+        if (editor._isMenufixed) {
+            top = top + (($menuContainer.offset().top + $menuContainer.outerHeight()) - $panel.offset().top);
+
+            // 重新设置top
+            $panel.css({
+                top: top
+            });
+        }
 
         // 设置三角形 tip 的位置
         $triangle.css({
@@ -1840,14 +1972,178 @@ _e(function (E, $) {
 _e(function (E, $) {
 
     // 定义构造函数
-    var Modal = function () {
+    var Modal = function (editor, menu, opt) {
+        this.editor = editor;
+        this.menu = menu;
+        this.$content = opt.$content;
 
+        this.init();
     };
 
     Modal.fn = Modal.prototype;
 
     // 暴露给 E 即 window.wangEditor
     E.Modal = Modal;
+});
+// modal fn bind
+_e(function (E, $) {
+
+    var Modal = E.Modal;
+
+    Modal.fn.init = function () {
+        var self = this;
+
+        // 初始化dom
+        self.initDom();
+
+        // 初始化隐藏事件
+        self.initHideEvent();
+    };
+
+    // 初始化dom
+    Modal.fn.initDom = function () {
+        var self = this;
+        var $content = self.$content;
+        var $modal = $('<div class="wangEditor-modal"></div>');
+        var $close = $('<div class="wangEditor-modal-close"><i class="wangeditor-menu-img-cancel-circle"></i></div>');
+
+        $modal.append($close);
+        $modal.append($content);
+
+        // 记录数据
+        self.$modal = $modal;
+        self.$close = $close;
+    };
+
+    // 初始化隐藏事件
+    Modal.fn.initHideEvent = function () {
+        var self = this;
+        var $close = self.$close;
+        var modal = self.$modal.get(0);
+
+        // 点击 $close 按钮，隐藏
+        $close.click(function () {
+            self.hide();
+        });
+
+        // 点击其他部分，隐藏
+        E.$body.on('click', function (e) {
+            if (!self.isShowing) {
+                return;
+            }
+            var trigger = e.target;
+
+            // 获取菜单elem
+            var menu = self.menu;
+            var menuDom;
+            if (menu) {
+                if (menu.selected) {
+                    menuDom = menu.$domSelected.get(0);
+                } else {
+                    menuDom = menu.$domNormal.get(0);
+                }
+
+                if (menuDom === trigger || $.contains(menuDom, trigger)) {
+                    // 说明由本菜单点击触发的
+                    return;
+                }
+            }
+
+            if (modal === trigger || $.contains(modal, trigger)) {
+                // 说明由本panel点击触发的
+                return;
+            }
+
+            // 其他情况，隐藏 panel
+            self.hide();
+        });
+    };
+});
+// modal fn api
+_e(function (E, $) {
+
+    var Modal = E.Modal;
+
+    // 渲染
+    Modal.fn._render = function () {
+        var self = this;
+        var editor = self.editor;
+        var $modal = self.$modal;
+
+        // $modal的z-index，在配置的z-index基础上再 +10
+        $modal.css('z-index', editor.config.zindex + 10 + '');
+
+        // 渲染到body最后面
+        E.$body.append($modal);
+
+        // 记录状态
+        self.rendered = true;
+    };
+
+    // 定位
+    Modal.fn._position = function () {
+        var self = this;
+        var $modal = self.$modal;
+        var top = $modal.offset().top;
+        var width = $modal.outerWidth();
+        var height = $modal.outerHeight();
+        var marginLeft = 0 - (width / 2);
+        var marginTop = 0 - (height / 2);
+        var sTop = E.$window.scrollTop();
+
+        // 保证modal最顶部，不超过浏览器上边框
+        if ((height / 2) > top) {
+            marginTop = 0 - top;
+        }
+
+        $modal.css({
+            'margin-left': marginLeft + 'px',
+            'margin-top': (marginTop + sTop) + 'px'
+        });
+    };
+
+    // 显示
+    Modal.fn.show = function () {
+        var self = this;
+        var menu = self.menu;
+        if (!self.rendered) {
+            // 第一次show之前，先渲染
+            self._render();
+        }
+
+        if (self.isShowing) {
+            return;
+        }
+        // 记录状态
+        self.isShowing = true;
+
+        var $modal = self.$modal;
+        $modal.show();
+
+        // 定位
+        self._position();
+
+        // 激活菜单状态
+        menu && menu.activeStyle(true);
+    };
+
+    // 隐藏
+    Modal.fn.hide = function () {
+        var self = this;
+        var menu = self.menu;
+        if (!self.isShowing) {
+            return;
+        }
+        // 记录状态
+        self.isShowing = false;
+
+        // 隐藏
+        var $modal = self.$modal;
+        $modal.hide();
+
+        // 菜单状态
+        menu && menu.activeStyle(false);
+    };
 });
 // txt 构造函数
 _e(function (E, $) {
@@ -1905,6 +2201,9 @@ _e(function (E, $) {
         // enter时，不能使用 div 换行
         self.bindEnterForDiv();
 
+        // enter时，用 p 包裹 text
+        self.bindEnterForText();
+
         // tab 插入4个空格
         self.bindTabEvent();
 
@@ -1913,6 +2212,9 @@ _e(function (E, $) {
 
         // $txt.formatText() 方法
         self.bindFormatText();
+
+        // 定义 $txt.html() 方法
+        self.bindHtml();
     };
 
     // 删除时，如果没有内容了，就添加一个 <p><br></p>
@@ -1922,11 +2224,23 @@ _e(function (E, $) {
         var $txt = self.$txt;
         var $p;
 
+        $txt.on('keydown', function (e) {
+            if (e.keyCode !== 8) {
+                return;
+            }
+            var txtHtml = $.trim($txt.html().toLowerCase());
+            if (txtHtml === '<p><br></p>') {
+                // 如果最后还剩余一个空行，就不再继续删除了
+                e.preventDefault();
+                return;
+            }
+        });
+
         $txt.on('keyup', function (e) {
             if (e.keyCode !== 8) {
                 return;
             }
-            var txtHtml = $.trim($txt.html());
+            var txtHtml = $.trim($txt.html().toLowerCase());
             // ff时用 txtHtml === '<br>' 判断，其他用 !txtHtml 判断
             if (!txtHtml || txtHtml === '<br>') {
                 // 内容空了
@@ -1993,6 +2307,24 @@ _e(function (E, $) {
         });
     };
 
+    // enter时，用 p 包裹 text
+    Txt.fn.bindEnterForText = function () {
+        var self = this;
+        var $txt = self.$txt;
+        var handle;
+        $txt.on('keyup', function (e) {
+            if (e.keyCode !== 13) {
+                return;
+            }
+            if (!handle) {
+                handle = function() {
+                    self.wrapImgAndText();
+                };
+            }
+            setTimeout(handle);
+        });
+    };
+
     // tab 时，插入4个空格
     Txt.fn.bindTabEvent = function () {
         var self = this;
@@ -2015,43 +2347,101 @@ _e(function (E, $) {
     Txt.fn.bindPasteFilter = function () {
         var self = this;
         var editor = self.editor;
-        var resultHtml;
+        var resultHtml = '';  //存储最终的结果
         var $txt = self.$txt;
+        var legalTags = editor.config.legalTags;
+        var legalTagArr = legalTags.split(',');
+
         $txt.on('paste', function (e) {
             if (!editor.config.pasteFilter) {
                 // 配置中取消了粘贴过滤
                 return;
             }
+
+            var currentNodeName = editor.getRangeElem().nodeName;
+            if (currentNodeName === 'TD' || currentNodeName === 'TH') {
+                // 在表格的单元格中粘贴，忽略所有内容。否则会出现异常情况
+                return;
+            }
+
+            resultHtml = ''; // 先清空 resultHtml
+
             var pasteHtml, $paste;
             var data = e.clipboardData || e.originalEvent.clipboardData;
+            var ieData = window.clipboardData;
 
-            if (data && data.getData) {
-                // w3c
+            if (editor.config.pasteText) {
+                // 只粘贴纯文本
 
-                // 获取粘贴过来的html
-                pasteHtml = data.getData('text/html');
-                // 创建dom
-                $paste = $('<div>' + pasteHtml + '</div>');
-                // 处理，并将结果存储到 resultHtml 变量
-                resultHtml = '';
-                handle($paste.get(0));
-            } else if (window.clipboardData && window.clipboardData.getData) {
-                // IE 直接从剪切板中取出纯文本格式
-                resultHtml = window.clipboardData.getData('text');
-                if (!resultHtml) {
+                if (data && data.getData) {
+                    // w3c
+                    pasteHtml = data.getData('text/plain');
+                } else if (ieData && ieData.getData) {
+                    // IE
+                    pasteHtml = ieData.getData('text');
+                } else {
+                    // 其他情况
                     return;
                 }
+
                 // 拼接为 <p> 标签
-                resultHtml = '<p>' + resultHtml + '</p>';
-                resultHtml = resultHtml.replace((new RegExp('\n', 'g'), '</p><p>'));
+                if (pasteHtml) {
+                    resultHtml = '<p>' + pasteHtml + '</p>';
+                }
+
             } else {
-                // 其他情况
-                return;
+                // 粘贴过滤了样式的、只有标签的 html
+
+                if (data && data.getData) {
+                    // w3c
+
+                    // 获取粘贴过来的html
+                    pasteHtml = data.getData('text/html');
+                    if (pasteHtml) {
+                        // 创建dom
+                        $paste = $('<div>' + pasteHtml + '</div>');
+                        // 处理，并将结果存储到 resultHtml 『全局』变量
+                        handle($paste.get(0));
+                    } else {
+                        // 得不到html，试图获取text
+                        pasteHtml = data.getData('text/plain');
+                        if (pasteHtml) {
+                            // 替换特殊字符
+                            pasteHtml = pasteHtml.replace(/[ ]/g, '&nbsp;')
+                                                 .replace(/</g, '&lt;')
+                                                 .replace(/>/g, '&gt;')
+                                                 .replace(/\n/g, '</p><p>');
+                            // 拼接
+                            resultHtml = '<p>' + pasteHtml + '</p>';
+
+                            // 查询链接
+                            resultHtml = resultHtml.replace(/<p>(https?:\/\/.*?)<\/p>/ig, function (match, link) {
+                                return '<p><a href="' + link + '" target="_blank">' + link + '</p>';
+                            });
+                        }
+                    }
+                    
+                } else if (ieData && ieData.getData) {
+                    // IE 直接从剪切板中取出纯文本格式
+                    resultHtml = ieData.getData('text');
+                    if (!resultHtml) {
+                        return;
+                    }
+                    // 拼接为 <p> 标签
+                    resultHtml = '<p>' + resultHtml + '</p>';
+                    resultHtml = resultHtml.replace(new RegExp('\n', 'g'), '</p><p>');
+                } else {
+                    // 其他情况
+                    return;
+                }
             }
 
             // 执行命令
             if (resultHtml) {
                 editor.command(e, 'insertHtml', resultHtml);
+
+                // 删除内容为空的 p 和嵌套的 p
+                self.clearEmptyOrNestP();
             }
         });
 
@@ -2063,54 +2453,101 @@ _e(function (E, $) {
             var $elem;
             var nodeName = elem.nodeName.toLowerCase();
             var nodeType = elem.nodeType;
-            var children, length, i;
 
-            // 只处理文本标签和node标签
+            // 只处理文本和普通node标签
             if (nodeType !== 3 && nodeType !== 1) {
                 return;
             }
 
-            // 链接
-            if (nodeName === 'a' && elem.href) {
-                resultHtml = resultHtml + '<p><a href="' + elem.href + '" >' + (elem.textContent || elem.innerHTML) + '</a></p>';
+            $elem = $(elem);
+
+            // 如果是容器，则继续深度遍历
+            if (nodeName === 'div') {
+                $.each(elem.childNodes, function () {
+                    // elem.childNodes 可获取TEXT节点，而 $elem.children() 就获取不到
+                    handle(this);
+                });
                 return;
             }
-
-            // 图片节点
-            if (nodeName === 'img' && elem.src) {
-                resultHtml = resultHtml + '<p><img src="' + elem.src + '" style="max-width:100%"/></p>';
-                return;
+            
+            if (legalTagArr.indexOf(nodeName) >= 0) {
+                // 如果是合法标签之内的，则根据元素类型，获取值
+                resultHtml += getResult(elem);
+            } else if (nodeType === 3) {
+                // 如果是文本，则直接插入 p 标签
+                resultHtml += '<p>' + elem.textContent + '</p>';
+            } else if (nodeName === 'br') {
+                // <br>保留
+                resultHtml += '<br/>';
             }
-
-            // head
-            if (/^h\d$/.test(nodeName)) {
-                resultHtml = resultHtml + '<' + nodeName + '>' + (elem.textContent || elem.innerHTML) + '</' + nodeName + '>';
-                return;
-            }
-
-            // 表格、列表
-            if (nodeName === 'table' || nodeName === 'ul' || nodeName === 'ol') {
+            else {
+                // 忽略的标签
+                if (['meta', 'style', 'script', 'object', 'form', 'iframe', 'hr'].indexOf(nodeName) >= 0) {
+                    return;
+                }
+                // 其他标签，移除属性，插入 p 标签
                 $elem = $(removeAttrs(elem));
-                resultHtml += ($('<div></div>').append($elem)).html();
-                return;
+                // 注意，这里的 clone() 是必须的，否则会出错
+                resultHtml += $('<div>').append($elem.clone()).html();
             }
+        }
 
-            // 文本标签
-            if (nodeType === 3) {
-                resultHtml = resultHtml + '<p>' + (elem.textContent || elem.innerHTML) + '</p>';
-                return;
-            }
+        // 获取元素的结果
+        function getResult(elem) {
+            var nodeName = elem.nodeName.toLowerCase();
+            var $elem;
+            var htmlForP = '';
+            var htmlForLi = '';
 
-            // 其他情况，即不是 text、img、合法标签。但是有子元素
-            children = elem.childNodes;
-            length = children.length;
-            if (!length) {
-                // 无子元素，则忽略
-                return;
-            }
-            // 有子元素，则继续递归
-            for (i = 0; i < length; i++) {
-                handle(children[i]);
+            if (['blockquote'].indexOf(nodeName) >= 0) {
+
+                // 直接取出元素text即可
+                $elem = $(elem);
+                return '<' + nodeName + '>' + $elem.text() + '</' + nodeName + '>';
+
+            } else if (['p', 'h1', 'h2', 'h3', 'h4', 'h5'].indexOf(nodeName) >= 0) {
+
+                //p head 取出 text 和链接
+                elem = removeAttrs(elem);
+                $elem = $(elem);
+                htmlForP = $elem.html();
+
+                // 剔除 a img 之外的元素
+                htmlForP = htmlForP.replace(/<.*?>/ig, function (tag) {
+                    if (tag === '</a>' || tag.indexOf('<a ') === 0 || tag.indexOf('<img ') === 0) {
+                        return tag;
+                    } else {
+                        return '';
+                    }
+                });
+
+                return '<' + nodeName + '>' + htmlForP + '</' + nodeName + '>';
+
+            } else if (['ul', 'ol'].indexOf(nodeName) >= 0) {
+                
+                // ul ol元素，获取子元素（li元素）的text link img，再拼接
+                $elem = $(elem);
+                $elem.children().each(function () {
+                    var $li = $(removeAttrs(this));
+                    var html = $li.html();
+
+                    html = html.replace(/<.*?>/ig, function (tag) {
+                        if (tag === '</a>' || tag.indexOf('<a ') === 0 || tag.indexOf('<img ') === 0) {
+                            return tag;
+                        } else {
+                            return '';
+                        }
+                    });
+
+                    htmlForLi += '<li>' + html + '</li>';
+                });
+                return '<' + nodeName + '>' + htmlForLi + '</' + nodeName + '>';
+            
+            } else {
+                
+                // 其他元素，移除元素属性
+                $elem = $(removeAttrs(elem));
+                return $('<div>').append($elem).html();
             }
         }
 
@@ -2118,6 +2555,7 @@ _e(function (E, $) {
         function removeAttrs(elem) {
             var attrs = elem.attributes || [];
             var attrNames = [];
+            var exception = ['href', 'target', 'src', 'alt', 'rowspan', 'colspan']; //例外情况
 
             // 先存储下elem中所有 attr 的名称
             $.each(attrs, function (key, attr) {
@@ -2127,7 +2565,10 @@ _e(function (E, $) {
             });
             // 再根据名称删除所有attr
             $.each(attrNames, function (key, attr) {
-                elem.removeAttribute(attr);
+                if (exception.indexOf(attr) < 0) {
+                    // 除了 exception 规定的例外情况，删除其他属性
+                    elem.removeAttribute(attr);
+                }
             });
 
 
@@ -2190,6 +2631,48 @@ _e(function (E, $) {
             return $temp.text();
         };
     };
+
+    // 定制 $txt.html 方法
+    Txt.fn.bindHtml = function () {
+        var self = this;
+        var editor = self.editor;
+        var $txt = self.$txt;
+        var $valueContainer = editor.$valueContainer;
+        var valueNodeName = editor.valueNodeName;
+
+        $txt.html = function (html) {
+            var result;
+
+            if (valueNodeName === 'div') {
+                // div 生成的编辑器，取值、赋值，都直接触发jquery的html方法
+                result = $.fn.html.call($txt, html);
+            }
+
+            // textarea 生成的编辑器，则需要考虑赋值时，也给textarea赋值
+
+            if (html === undefined) {
+                // 取值，直接触发jquery原生html方法
+                result = $.fn.html.call($txt);
+
+                // 替换 html 中，src和href属性中的 & 字符。
+                // 因为 .html() 或者 .innerHTML 会把所有的 & 字符都改成 &amp; 但是 src 和 href 中的要保持 &
+                result = result.replace(/(href|src)\=\"(.*)\"/igm, function (a, b, c) {
+                    return b + '="' + c.replace('&amp;', '&') + '"';
+                });
+            } else {
+                // 赋值，需要同时给 textarea 赋值
+                result = $.fn.html.call($txt, html);
+                $valueContainer.val(html);
+            }
+
+            if (html === undefined) {
+                return result;
+            } else {
+                // 手动触发 change 事件，因为 $txt 监控了 change 事件来判断是否需要执行 editor.onchange 
+                $txt.change();
+            }
+        };
+    };
 });
 // Txt.fn api
 _e(function (E, $) {
@@ -2208,6 +2691,7 @@ _e(function (E, $) {
     // 计算高度
     Txt.fn.initHeight = function () {
         var editor = this.editor;
+        var $txt = this.$txt;
         var valueContainerHeight = editor.$valueContainer.height();
         var menuHeight = editor.menuContainer.height();
         var txtHeight = valueContainerHeight - menuHeight;
@@ -2215,23 +2699,111 @@ _e(function (E, $) {
         // 限制最小为 50px
         txtHeight = txtHeight < 50 ? 50 : txtHeight;
 
-        this.$txt.height(txtHeight);
+        $txt.height(txtHeight);
+
+        // 记录原始高度
+        editor.valueContainerHeight = valueContainerHeight;
+
+        // 设置 max-height
+        this.initMaxHeight(txtHeight, menuHeight);
+    };
+
+    // 计算最大高度
+    Txt.fn.initMaxHeight = function (txtHeight, menuHeight) {
+        var editor = this.editor;
+        var $menuContainer = editor.menuContainer.$menuContainer;
+        var $txt = this.$txt;
+        var $wrap = $('<div>');
+
+        // 需要浏览器支持 max-height，否则不管
+        if (window.getComputedStyle && 'max-height'in window.getComputedStyle($txt.get(0))) {
+            // 获取 max-height 并判断是否有值
+            var maxHeight = parseInt(editor.$valueContainer.css('max-height'));
+            if (isNaN(maxHeight)) {
+                return;
+            }
+
+            // max-height 和『全屏』暂时有冲突
+            if (editor.menus.fullscreen) {
+                E.warn('max-height和『全屏』菜单一起使用时，会有一些问题尚未解决，请暂时不要两个同时使用');
+                return;
+            }
+
+            // 标记
+            editor.useMaxHeight = true;
+
+            // 设置maxheight
+            $wrap.css({
+                'max-height': (maxHeight - menuHeight) + 'px',
+                'overflow-y': 'auto'
+            });
+            $txt.css({
+                'height': 'auto',
+                'overflow-y': 'visible',
+                'min-height': txtHeight + 'px'
+            });
+
+            // 滚动式，菜单阴影
+            $wrap.on('scroll', function () {
+                if ($txt.parent().scrollTop() > 10) {
+                    $menuContainer.addClass('wangEditor-menu-shadow');
+                } else {
+                    $menuContainer.removeClass('wangEditor-menu-shadow');
+                }
+            });
+
+            // 需在编辑器区域外面再包裹一层
+            $txt.wrap($wrap);
+        }
     };
 
     // 保存选区
     Txt.fn.saveSelectionEvent = function () {
         var $txt = this.$txt;
         var editor = this.editor;
+        var timeoutId;
+        var dt = Date.now();
+
+        function save() {
+            editor.saveSelection();
+        }
+
+        // 同步保存选区
+        function saveSync() {
+            // 100ms之内，不重复保存
+            if (Date.now() - dt < 100) {
+                return;
+            }
+
+            dt = Date.now();
+            save();
+        }
+
+        // 异步保存选区
+        function saveAync() {
+            // 节流，防止高频率重复操作
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+            timeoutId = setTimeout(save, 300);
+        }
 
         // txt change 、focus、blur 时随时保存选区
         $txt.on(txtChangeEventNames + ' focus blur', function (e) {
-            editor.saveSelection();
+            // 先同步保存选区，为了让接下来就马上要执行 editor.getRangeElem() 的程序
+            // 能够获取到正确的 rangeElem
+            saveSync();
+
+            // 再异步保存选区，为了确定更加准确的选区，为后续的操作做准备
+            saveAync();
         });
 
         // 鼠标拖拽选择时，可能会拖拽到编辑器区域外面再松手，此时 $txt 就监听不到 click事件了
         $txt.on('mousedown', function () {
             $txt.on('mouseleave.saveSelection', function (e) {
-                editor.saveSelection();
+                // 先同步后异步，如上述注释
+                saveSync();
+                saveAync();
 
                 // 顺道吧菜单状态也更新了
                 editor.updateMenuStyle();
@@ -2304,8 +2876,72 @@ _e(function (E, $) {
             return;
         }
 
-        if ($children.last().html() !== '<br>') {
+        if ($.trim($children.last().html()).toLowerCase() !== '<br>') {
             $txt.append($('<p><br></p>'));
+        }
+    };
+
+    // 将编辑器暴露出来的文字和图片，都用 p 来包裹
+    Txt.fn.wrapImgAndText = function () {
+        var $txt = this.$txt;
+        var $imgs = $txt.children('img');
+        var txt = $txt[0];
+        var childNodes = txt.childNodes;
+        var childrenLength = childNodes.length;
+        var i, childNode, p;
+
+        // 处理图片
+        $imgs.length && $imgs.each(function () {
+            $(this).wrap('<p>');
+        });
+
+        // 处理文字
+        for (i = 0; i < childrenLength; i++) {
+            childNode = childNodes[i];
+            if (childNode.nodeType === 3 && childNode.textContent && $.trim(childNode.textContent)) {
+                $(childNode).wrap('<p>');
+            }
+        }
+    };
+
+    // 清空内容为空的<p>，以及重复包裹的<p>（在windows下的chrome粘贴文字之后，会出现上述情况）
+    Txt.fn.clearEmptyOrNestP = function () {
+        var $txt = this.$txt;
+        var $pList = $txt.find('p');
+
+        $pList.each(function () {
+            var $p = $(this);
+            var $children = $p.children();
+            var childrenLength = $children.length;
+            var $firstChild;
+            var content = $.trim($p.html());
+
+            // 内容为空的p
+            if (!content) {
+                $p.remove();
+                return;
+            }
+
+            // 嵌套的p
+            if (childrenLength === 1) {
+                $firstChild = $children.first();
+                if ($firstChild.get(0) && $firstChild.get(0).nodeName === 'P') {
+                    $p.html( $firstChild.html() );
+                }
+            }
+        });
+    };
+
+    // 获取 scrollTop
+    Txt.fn.scrollTop = function (val) {
+        var self = this;
+        var editor = self.editor;
+        var $txt = self.$txt;
+
+        if (editor.useMaxHeight) {
+            return $txt.parent().scrollTop(val);
+        } else {
+            return $txt.scrollTop(val);
         }
     };
 
@@ -2487,7 +3123,7 @@ _e(function (E, $) {
         table: '表格',
         emotion: '表情',
         img: '图片',
-        vedio: '视频',
+        video: '视频',
         'width': '宽',
         'height': '高',
         location: '位置',
@@ -2499,7 +3135,8 @@ _e(function (E, $) {
         insertcode: '插入代码',
         undo: '撤销',
         redo: '重复',
-        fullscreen: '全屏'
+        fullscreen: '全屏',
+        openLink: '打开链接'
     };
 
     // 英文
@@ -2529,7 +3166,7 @@ _e(function (E, $) {
         table: 'Table',
         emotion: 'Emotions',
         img: 'Image',
-        vedio: 'Vedio',
+        video: 'Video',
         'width': 'width',
         'height': 'height',
         location: 'Location',
@@ -2541,7 +3178,8 @@ _e(function (E, $) {
         insertcode: 'Insert Code',
         undo: 'Undo',
         redo: 'Redo',
-        fullscreen: 'Full screnn'
+        fullscreen: 'Full screnn',
+        openLink: 'open link'
     };
 });
 // 全局配置
@@ -2549,6 +3187,7 @@ _e(function (E, $) {
 
     E.config = {};
 
+    // 全屏时的 z-index
     E.config.zindex = 10000;
 
     // 是否打印log
@@ -2594,7 +3233,7 @@ _e(function (E, $) {
         'emotion',
         '|',
         'img',
-        'vedio',
+        'video',
         'location',
         'insertcode',
         '|',
@@ -2603,6 +3242,7 @@ _e(function (E, $) {
         'fullscreen'
     ];
 
+    // 颜色配置
     E.config.colors = {
         // 'value': 'title'
         '#880000': '暗红色',
@@ -2623,92 +3263,92 @@ _e(function (E, $) {
         '#ffffff': '白色'
     };
 
+    // 字体
     E.config.familys = [
         '宋体', '黑体', '楷体', '微软雅黑',
         'Arial', 'Verdana', 'Georgia',
         'Times New Roman', 'Microsoft JhengHei',
-        'Trebuchet MS', 'Courier New', 'Impact', 'Comic Sans MS'
+        'Trebuchet MS', 'Courier New', 'Impact', 'Comic Sans MS', 'Consolas'
     ];
 
+    // 字号
     E.config.fontsizes = {
         // 格式：'value': 'title'
-        1: '10px',
+        1: '12px',
         2: '13px',
         3: '16px',
-        4: '19px',
-        5: '22px',
-        6: '25px',
-        7: '28px'
+        4: '18px',
+        5: '24px',
+        6: '32px',
+        7: '48px'
     };
 
     // 表情包
+    E.config.emotionsShow = 'icon'; // 显示项，默认为'icon'，也可以配置成'value'
     E.config.emotions = {
-        'default': {
-            title: '默认',
-            size: 18,
-            imgs: [
-                '../static/emotions/default/1.gif',
-                '../static/emotions/default/2.gif',
-                '../static/emotions/default/3.gif',
-                '../static/emotions/default/4.gif',
-                '../static/emotions/default/5.gif',
-                '../static/emotions/default/6.gif',
-                '../static/emotions/default/7.gif',
-                '../static/emotions/default/8.gif',
-                '../static/emotions/default/9.gif',
-                '../static/emotions/default/10.gif',
-                '../static/emotions/default/11.gif',
-                '../static/emotions/default/12.gif',
-                '../static/emotions/default/13.gif',
-                '../static/emotions/default/14.gif',
-                '../static/emotions/default/15.gif',
-                '../static/emotions/default/16.gif',
-                '../static/emotions/default/17.gif',
-                '../static/emotions/default/18.gif',
-                '../static/emotions/default/19.gif',
-                '../static/emotions/default/20.gif',
-                '../static/emotions/default/21.gif',
-                '../static/emotions/default/22.gif',
-                '../static/emotions/default/23.gif',
-                '../static/emotions/default/24.gif',
-                '../static/emotions/default/25.gif',
-                '../static/emotions/default/26.gif',
-                '../static/emotions/default/27.gif',
-                '../static/emotions/default/28.gif',
-                '../static/emotions/default/29.gif',
-                '../static/emotions/default/30.gif',
-                '../static/emotions/default/31.gif',
-                '../static/emotions/default/32.gif',
-                '../static/emotions/default/33.gif',
-                '../static/emotions/default/34.gif',
-                '../static/emotions/default/35.gif',
-                '../static/emotions/default/36.gif',
-                '../static/emotions/default/37.gif',
-                '../static/emotions/default/38.gif',
-                '../static/emotions/default/39.gif',
-                '../static/emotions/default/40.gif',
-                '../static/emotions/default/41.gif',
-                '../static/emotions/default/42.gif',
-                '../static/emotions/default/43.gif',
-                '../static/emotions/default/44.gif',
-                '../static/emotions/default/45.gif',
-                '../static/emotions/default/46.gif',
-                '../static/emotions/default/47.gif',
-                '../static/emotions/default/48.gif',
-                '../static/emotions/default/49.gif',
-                '../static/emotions/default/50.gif'
-            ]
-        },
-        'jinxing': {
-            title: '金星',
-            size: 50,
-            imgs: [
-                '../static/emotions/jinxing/1.gif',
-                '../static/emotions/jinxing/2.gif',
-                '../static/emotions/jinxing/3.gif',
-                '../static/emotions/jinxing/4.gif',
-                '../static/emotions/jinxing/5.gif',
-                '../static/emotions/jinxing/6.gif'
+        // 'default': {
+        //     title: '默认',
+        //     data: './emotions.data'
+        // },
+        'weibo': {
+            title: '微博表情',
+            data: [
+                {
+                    icon: 'http://img.t.sinajs.cn/t35/style/images/common/face/ext/normal/7a/shenshou_thumb.gif',
+                    value: '[草泥马]'    
+                },
+                {
+                    icon: 'http://img.t.sinajs.cn/t35/style/images/common/face/ext/normal/60/horse2_thumb.gif',
+                    value: '[神马]'    
+                },
+                {
+                    icon: 'http://img.t.sinajs.cn/t35/style/images/common/face/ext/normal/bc/fuyun_thumb.gif',
+                    value: '[浮云]'    
+                },
+                {
+                    icon: 'http://img.t.sinajs.cn/t35/style/images/common/face/ext/normal/c9/geili_thumb.gif',
+                    value: '[给力]'    
+                },
+                {
+                    icon: 'http://img.t.sinajs.cn/t35/style/images/common/face/ext/normal/f2/wg_thumb.gif',
+                    value: '[围观]'    
+                },
+                {
+                    icon: 'http://img.t.sinajs.cn/t35/style/images/common/face/ext/normal/70/vw_thumb.gif',
+                    value: '[威武]'
+                },
+                {
+                    icon: 'http://img.t.sinajs.cn/t35/style/images/common/face/ext/normal/6e/panda_thumb.gif',
+                    value: '[熊猫]'
+                },
+                {
+                    icon: 'http://img.t.sinajs.cn/t35/style/images/common/face/ext/normal/81/rabbit_thumb.gif',
+                    value: '[兔子]'
+                },
+                {
+                    icon: 'http://img.t.sinajs.cn/t35/style/images/common/face/ext/normal/bc/otm_thumb.gif',
+                    value: '[奥特曼]'
+                },
+                {
+                    icon: 'http://img.t.sinajs.cn/t35/style/images/common/face/ext/normal/15/j_thumb.gif',
+                    value: '[囧]'
+                },
+                {
+                    icon: 'http://img.t.sinajs.cn/t35/style/images/common/face/ext/normal/89/hufen_thumb.gif',
+                    value: '[互粉]'
+                },
+                {
+                    icon: 'http://img.t.sinajs.cn/t35/style/images/common/face/ext/normal/c4/liwu_thumb.gif',
+                    value: '[礼物]'
+                },
+                {
+                    icon: 'http://img.t.sinajs.cn/t35/style/images/common/face/ext/normal/ac/smilea_thumb.gif',
+                    value: '[呵呵]'
+                },
+                {
+                    icon: 'http://img.t.sinajs.cn/t35/style/images/common/face/ext/normal/0b/tootha_thumb.gif',
+                    value: '[哈哈]'
+                }
             ]
         }
     };
@@ -2721,10 +3361,35 @@ _e(function (E, $) {
     E.config.uploadImgUrl = '';
     // 超时时间
     E.config.uploadTimeout = 20 * 1000;
+    // 用于存储上传回调事件
+    E.config.uploadImgFns = {};
+    // 自定义上传图片的filename
+    // E.config.uploadImgFileName = 'customFileName';
+
+    // 自定义上传，设置为 true 之后，显示上传图标
+    E.config.customUpload = false;
+    // 自定义上传的init事件
+    // E.config.customUploadInit = function () {....};
+
+    // 自定义上传时传递的参数（如 token）
+    E.config.uploadParams = {
+        /* token: 'abcdef12345' */
+    };
+
+    // 自定义上传是的header参数
+    E.config.uploadHeaders = {
+         /* 'Accept' : 'text/x-json' */
+    };
+
+    // 隐藏网络图片，默认为 false
+    E.config.hideLinkImg = false;
 
     // 是否过滤粘贴内容
     E.config.pasteFilter = true;
-     
+
+    // 是否粘贴纯文本，当 editor.config.pasteFilter === false 时候，此配置将失效
+    E.config.pasteText = false;
+
 });
 // 全局UI
 _e(function (E, $) {
@@ -2826,7 +3491,7 @@ _e(function (E, $) {
             normal: '<a href="#" tabindex="-1"><i class="wangeditor-menu-img-picture"></i></a>',
             selected: '.selected'
         },
-        vedio: {
+        video: {
             normal: '<a href="#" tabindex="-1"><i class="wangeditor-menu-img-play"></i></a>',
             selected: '.selected'
         },
@@ -3303,6 +3968,7 @@ _e(function (E, $) {
         }
         var editor = this;
         var lang = editor.config.lang;
+        var txtHtml;
 
         // 创建 menu 对象
         var menu = new E.Menu({
@@ -3312,6 +3978,25 @@ _e(function (E, $) {
         });
 
         menu.isShowCode = false;
+
+        // 更新内容
+        function updateValue() {
+            var $code = menu.$codeTextarea;
+            var $txt = editor.txt.$txt;
+            var value = $.trim($code.val()); // 取值
+
+            if (!value) {
+                value = '<p><br></p>';
+            }
+            
+            // 过滤js代码
+            if (editor.config.jsFilter) {
+                
+                value = value.replace(/<script[\s\S]*?<\/script>/ig, '');
+            }
+            // 赋值
+            $txt.html(value);
+        }
 
         // 定义click事件
         menu.clickEvent = function (e) {
@@ -3345,6 +4030,9 @@ _e(function (E, $) {
 
             // 禁用其他菜单
             editor.disableMenusExcept('source');
+
+            // 记录当前html值
+            txtHtml = $txt.html();
         };
 
         // 定义选中状态下的click事件
@@ -3359,16 +4047,8 @@ _e(function (E, $) {
                 return;
             }
 
-            // 取值
-            value = $code.val();
-            
-            if (editor.config.jsFilter) {
-                // 过滤js代码
-                value = value.replace(/<script[\s\S]*?<\/script>/ig, '');
-            }
-
-            // 赋值
-            $txt.html(value);
+            // 更新内容
+            updateValue();
 
             // 渲染
             $code.after($txt).hide();
@@ -3382,6 +4062,13 @@ _e(function (E, $) {
 
             // 启用其他菜单
             editor.enableMenusExcept('source');
+
+            // 判断是否执行 onchange 事件
+            if ($txt.html() !== txtHtml) {
+                if (editor.onchange && typeof editor.onchange === 'function') {
+                    editor.onchange.call(editor);
+                }
+            }
         };
 
         // 定义切换选中状态事件
@@ -3768,11 +4455,33 @@ _e(function (E, $) {
             }
         */
 
+        var isOrderedList;
+        function beforeEvent(e) {
+            if (editor.queryCommandState('InsertOrderedList')) {
+                isOrderedList = true;
+
+                // 先取消有序列表
+                editor.command(e, 'InsertOrderedList');
+            } else {
+                isOrderedList = false;
+            }
+        }
+
+        function afterEvent(e) {
+            if (isOrderedList) {
+                // 再设置有序列表
+                editor.command(e, 'InsertOrderedList');
+            }
+        }
+
         // 创建droplist
         var tpl = '{#commandValue}{#title}';
         menu.dropList = new E.DropList(editor, menu, {
             data: data,
-            tpl: tpl
+            tpl: tpl,
+            // 对 ol 直接设置 head，会出现每个 li 的 index 都变成 1 的问题，因此要先取消 ol，然后设置 head，最后再增加上 ol
+            beforeEvent: beforeEvent,
+            afterEvent: afterEvent
         });
 
         // 定义 update selected 事件
@@ -3867,6 +4576,10 @@ _e(function (E, $) {
                         return true;
                     }
                 }
+                if ($(elem).attr('align') === 'left') {
+                    // ff 中，设置align-left之后，会是 <p align="left">xxx</p>
+                    return true;
+                }
                 return false;
             });
             if (rangeElem) {
@@ -3910,6 +4623,10 @@ _e(function (E, $) {
                         return true;
                     }
                 }
+                if ($(elem).attr('align') === 'center') {
+                    // ff 中，设置align-center之后，会是 <p align="center">xxx</p>
+                    return true;
+                }
                 return false;
             });
             if (rangeElem) {
@@ -3952,6 +4669,10 @@ _e(function (E, $) {
                     if (cssText && /text-align:\s*right;/.test(cssText)) {
                         return true;
                     }
+                }
+                if ($(elem).attr('align') === 'right') {
+                    // ff 中，设置align-right之后，会是 <p align="right">xxx</p>
+                    return true;
                 }
                 return false;
             });
@@ -4019,7 +4740,7 @@ _e(function (E, $) {
 
             // 重置 input
             $textInput.val('');
-            $urlInput.val('');
+            $urlInput.val('http://');
 
             // 获取url
             var url = '';
@@ -4226,10 +4947,10 @@ _e(function (E, $) {
         var $tr;
         var i, j;
 
-        // 创建一个10行10列的表格
-        for (i = 0; i < 10; i++) {
+        // 创建一个n行n列的表格
+        for (i = 0; i < 15; i++) {
             $tr = $('<tr index="' + (i + 1) + '">');
-            for (j = 0; j < 10; j++) {
+            for (j = 0; j < 20; j++) {
                 $tr.append($('<td index="' + (j + 1) + '">'));
             }
             $table.append($tr);
@@ -4273,6 +4994,9 @@ _e(function (E, $) {
         }).on('mouseleave', function (e) {
             // mouseleave 删除背景色
             $table.find('td').removeClass('active');
+
+            $row.text(0);
+            $col.text(0);
         });
 
         // 插入表格
@@ -4288,16 +5012,16 @@ _e(function (E, $) {
             // -------- 拼接tabel html --------
 
             var i, j;
-            var tableHtml = '\n<table>';
+            var tableHtml = '<table>';
             for (i = 0; i < rownum; i++) {
-                tableHtml += '\n  <tr>';
+                tableHtml += '<tr>';
 
                 for (j = 0; j < colnum; j++) {
-                    tableHtml += '\n    <td><span>&nbsp;</span></td>';
+                    tableHtml += '<td><span>&nbsp;</span></td>';
                 }
-                tableHtml += '\n  </tr>';
+                tableHtml += '</tr>';
             }
-            tableHtml += '\n</table>\n';
+            tableHtml += '</table>';
 
             // -------- 执行命令 --------
             editor.command(e, 'insertHtml', tableHtml);
@@ -4306,7 +5030,7 @@ _e(function (E, $) {
         // 创建 panel
         menu.dropPanel = new E.DropPanel(editor, menu, {
             $content: $content,
-            width: 181
+            width: 262
         });
 
         // 增加到editor对象中
@@ -4323,8 +5047,13 @@ _e(function (E, $) {
             return;
         }
         var editor = this;
-        var lang = editor.config.lang;
-        var configEmotions = editor.config.emotions;
+        var config = editor.config;
+        var lang = config.lang;
+        var configEmotions = config.emotions;
+        var emotionsShow = config.emotionsShow;
+
+        // 记录每一个表情图片的地址
+        editor.emotionUrls = [];
 
         // 创建 menu 对象
         var menu = new E.Menu({
@@ -4333,33 +5062,41 @@ _e(function (E, $) {
             title: lang.emotion
         });
 
-        // 拼接 dropPanel 内容
-        var $panelContent = $('<div class="panel-tab"></div>');
-        var $tabContainer = $('<div class="tab-container"></div>');
-        var $contentContainer = $('<div class="content-container"></div>');
-        $.each(configEmotions, function (k, val) {
-            var title = val.title;
-            var size = val.size;
-            var imgs = val.imgs;
-
-            var $tab = $('<a href="#">' + title +' </a>');
-            $tabContainer.append($tab);
-            var $tabContent = $('<div class="content"></div>');
-            $contentContainer.append($tabContent);
-
+        // 添加表情图片的函数
+        function insertEmotionImgs(data, $tabContent) {
             // 添加表情图片
-            $.each(imgs, function (k, src) {
-                var $command = $('<a href="#" commandValue="' + src + '"></a>');
+            $.each(data, function (k, emotion) {
+                var src = emotion.icon || emotion.url;
+                var value = emotion.value || emotion.title;
+                // 通过配置 editor.config.emotionsShow 的值来修改插入到编辑器的内容（图片/value）
+                var commandValue = emotionsShow === 'icon' ? src : value;
+                var $command = $('<a href="#" commandValue="' + commandValue + '"></a>');
                 var $img = $('<img>');
-                $img.css({
-                    width: size + 'px',
-                    height: size + 'px'
-                });
                 $img.attr('_src', src);  // 先将 src 复制到 '_src' 属性，先不加载
 
                 $command.append($img);
                 $tabContent.append($command);
+
+                // 记录下每一个表情图片的地址
+                editor.emotionUrls.push(src);
             });
+        }
+
+        // 拼接 dropPanel 内容
+        var $panelContent = $('<div class="panel-tab"></div>');
+        var $tabContainer = $('<div class="tab-container"></div>');
+        var $contentContainer = $('<div class="content-container emotion-content-container"></div>');
+        $.each(configEmotions, function (k, emotion) {
+            var title = emotion.title;
+            var data = emotion.data;
+
+            E.log('正在处理 ' + title + ' 表情的数据...');
+
+            // 增加该组表情的tab和content
+            var $tab = $('<a href="#">' + title +' </a>');
+            $tabContainer.append($tab);
+            var $tabContent = $('<div class="content"></div>');
+            $contentContainer.append($tabContent);
 
             // tab 切换事件
             $tab.click(function (e) {
@@ -4369,6 +5106,25 @@ _e(function (E, $) {
                 $tab.addClass('selected');
                 e.preventDefault();
             });
+
+            // 处理data
+            if (typeof data === 'string') {
+                // url 形式，需要通过ajax从该url获取数据
+                E.log('将通过 ' + data + ' 地址ajax下载表情包');
+                $.get(data, function (result) {
+                    result = $.parseJSON(result);
+                    E.log('下载完毕，得到 ' + result.length + ' 个表情');
+                    insertEmotionImgs(result, $tabContent);
+                });
+                
+            } else if ( Object.prototype.toString.call(data).toLowerCase().indexOf('array') > 0 ) {
+                // 数组，即 data 直接就是表情包数据
+                insertEmotionImgs(data, $tabContent);
+            } else {
+                // 其他情况，data格式不对
+                E.error('data 数据格式错误，请修改为正确格式，参考文档：' + E.docsite);
+                return;
+            }
         });
         $panelContent.append($tabContainer).append($contentContainer);
 
@@ -4379,9 +5135,20 @@ _e(function (E, $) {
         // 插入表情command事件
         $contentContainer.on('click', 'a[commandValue]', function (e) {
             var $a = $(e.currentTarget);
-            var src = $a.attr('commandValue');
+            var commandValue = $a.attr('commandValue');
+            var img;
 
-            editor.command(e, 'InsertImage', src);
+            // commandValue 有可能是图片url，也有可能是表情的 value，需要区别对待
+
+            if (emotionsShow === 'icon') {
+                // 插入图片
+                editor.command(e, 'InsertImage', commandValue);
+            } else {
+                // 插入value
+                editor.command(e, 'insertHtml', '<span>' + commandValue + '</span>');
+            }
+
+            e.preventDefault();
         });
 
         // 添加panel
@@ -4466,7 +5233,13 @@ _e(function (E, $) {
         // 添加panel
         menu.dropPanel = new E.DropPanel(editor, menu, {
             $content: $panelContent,
-            width: 400
+            width: 400,
+            onRender: function () {
+                // 渲染后的回调事件，用于执行自定义上传的init
+                // 因为渲染之后，上传面板的dom才会被渲染到页面，才能让第三方空间获取到
+                var init = editor.config.customUploadInit;
+                init && init.call(editor);
+            }
         });
 
         // 增加到editor对象中
@@ -4507,33 +5280,51 @@ _e(function (E, $) {
             $linkContent.addClass('selected');
         }
 
+        // 隐藏网络图片
+        function hideLinkImg() {
+            $tabContainer.remove();
+            $linkContent.remove();
+            $uploadContent.addClass('selected');
+        }
+
         // 判断用户是否配置了上传图片
         editor.ready(function () {
             var editor = this;
             var config = editor.config;
             var uploadImgUrl = config.uploadImgUrl;
+            var customUpload = config.customUpload;
+            var linkImg = config.hideLinkImg;
             var $uploadImgPanel;
 
-            // IE8 不支持图片上传（ form.submit 一直有bug ）！！！！！！！！！！！！
-            if (E.userAgent.indexOf('MSIE 8') > 0) {
-                hideUploadImg();
-                return;
-            }  // ！！！！！！！！！！
-
-            if (uploadImgUrl) {
+            if (uploadImgUrl || customUpload) {
                 // 第一，暴露出 $uploadContent 以便用户自定义 ！！！重要
                 editor.$uploadContent = $uploadContent;
 
                 // 第二，绑定tab切换事件
                 tabToggle();
+
+                if (linkImg) {
+                    // 隐藏网络图片
+                    hideLinkImg();
+                }
             } else {
                 // 未配置上传图片功能
                 hideUploadImg();
             }
+
+            // 点击 $uploadContent 立即隐藏 dropPanel
+            // 为了兼容IE8、9的上传，因为IE8、9使用 modal 上传
+            // 这里使用异步，为了不妨碍高级浏览器通过点击 $uploadContent 选择文件
+            function hidePanel() {
+                menu.dropPanel.hide();
+            }
+            $uploadContent.click(function () {
+                setTimeout(hidePanel);
+            });
         });
     });
 
-    // --------------- 处理上传图片content ---------------
+    // --------------- 处理网络图片content ---------------
     function linkContentHandler (editor, menu, $linkContent) {
         var lang = editor.config.lang;
         var $urlContainer = $('<div style="margin:20px 10px 10px 10px;"></div>');
@@ -4571,65 +5362,33 @@ _e(function (E, $) {
     }
 
 });
-// vedio 菜单
+// video 菜单
 _e(function (E, $) {
 
     E.createMenu(function (check) {
-        var menuId = 'vedio';
+        var menuId = 'video';
         if (!check(menuId)) {
             return;
         }
         var editor = this;
         var lang = editor.config.lang;
-        var reg = /^\s*(http:\/\/|https:\/\/).+(\.swf|\.ogg|\.mp4|\.webm)/i;
+        var reg = /^<(iframe)|(embed)/i;  // <iframe... 或者 <embed... 格式
 
         // 创建 menu 对象
         var menu = new E.Menu({
             editor: editor,
             id: menuId,
-            title: lang.vedio,
-            commandName: 'unLink'
+            title: lang.video
         });
-
-        // 视频代码模板 - flash
-        var vedioTplFlash = [
-            '<object classid="clsid:D27CDB6E-AE6D-11cf-96B8-444553540000" ',
-            '        codebase="http://download.macromedia.com/pub/shockwave/cabs/flash/swflash.cab#version=7,0,0,0" ',
-            '        width="#{width}" ',
-            '        height="#{height}" >',
-            '   <param name="movie" ',
-            '          value="#{vedioUrl}" />',
-            '   <param name="allowFullScreen" value="true" />',
-            '   <param name="allowScriptAccess" value="always" />',
-            '   <param value="transparent" name="wmode" />',
-            '   <embed src="#{vedioUrl}"',
-            '          width="#{width}" ',
-            '          height="#{height}" ',
-            '          name="cc_8E6888CDEA7087C49C33DC5901307461" ',
-            '          allowFullScreen="true" ',
-            '          wmode="transparent" ',
-            '          allowScriptAccess="always" ',
-            '          pluginspage="http://www.macromedia.com/go/getflashplayer" ',
-            '          type="application/x-shockwave-flash"/>',
-            '</object>',
-            '<p><br></p>'
-        ].join('');
-
-        // 视频代码模板 - h5
-        var vedioTplH5 = [
-            '<video src="#{vedioUrl}" controls="controls" width="#{width}" height="#{height}">',
-            '</video>',
-            '<p><br></p>'
-        ].join('');
 
         // 创建 panel 内容
         var $content = $('<div></div>');
-        var $urlInputContainer = $('<div style="margin:20px 10px;"></div>');
-        var $urlInput = $('<input type="text" class="block" placeholder="*.swf, *.mp4, *.ogg, *.webm"/>');
-        $urlInputContainer.append($urlInput);
+        var $linkInputContainer = $('<div style="margin:20px 10px;"></div>');
+        var $linkInput = $('<input type="text" class="block" placeholder=\'格式如：<iframe src="..." frameborder=0 allowfullscreen></iframe>\'/>');
+        $linkInputContainer.append($linkInput);
         var $sizeContainer = $('<div style="margin:20px 10px;"></div>');
-        var $widthInput = $('<input type="text" value="480" style="width:50px;text-align:center;"/>');
-        var $heightInput = $('<input type="text" value="360" style="width:50px;text-align:center;"/>');
+        var $widthInput = $('<input type="text" value="640" style="width:50px;text-align:center;"/>');
+        var $heightInput = $('<input type="text" value="498" style="width:50px;text-align:center;"/>');
         $sizeContainer.append('<span> ' + lang.width + ' </span>')
                       .append($widthInput)
                       .append('<span> px &nbsp;&nbsp;&nbsp;</span>')
@@ -4637,33 +5396,36 @@ _e(function (E, $) {
                       .append($heightInput)
                       .append('<span> px </span>');
         var $btnContainer = $('<div></div>');
+        var $howToCopy = $('<a href="http://www.kancloud.cn/wangfupeng/wangeditor2/134973" target="_blank" style="display:inline-block;margin-top:10px;margin-left:10px;color:#999;">如何复制视频链接？</a>');
         var $btnSubmit = $('<button class="right">' + lang.submit + '</button>');
         var $btnCancel = $('<button class="right gray">' + lang.cancel + '</button>');
-        $btnContainer.append($btnSubmit).append($btnCancel);
-        $content.append($urlInputContainer).append($sizeContainer).append($btnContainer);
+        $btnContainer.append($howToCopy).append($btnSubmit).append($btnCancel);
+        $content.append($linkInputContainer).append($sizeContainer).append($btnContainer);
 
         // 取消按钮
         $btnCancel.click(function (e) {
             e.preventDefault();
-            $urlInput.val('');
+            $linkInput.val('');
             menu.dropPanel.hide();
         });
 
         // 确定按钮
         $btnSubmit.click(function (e) {
             e.preventDefault();
-            var url = $.trim($urlInput.val());
+            var link = $.trim($linkInput.val());
+            var $link;
             var width = parseInt($widthInput.val());
             var height = parseInt($heightInput.val());
-            var html;
+            var $div = $('<div>');
+            var html = '<p style="text-align:center;">{content}</p>';
 
             // 验证数据
-            if (!url) {
+            if (!link) {
                 menu.dropPanel.focusFirstInput();
                 return;
             }
 
-            if (!reg.test(url)) {
+            if (!reg.test(link)) {
                 alert('视频链接格式错误！');
                 menu.dropPanel.focusFirstInput();
                 return;
@@ -4674,22 +5436,18 @@ _e(function (E, $) {
                 return;
             }
 
-            // 拼接 vedio 代码
-            if ((/.swf/i).test(url)) {
-                // swf 格式
-                html = vedioTplFlash.replace(/#{vedioUrl}/ig, url)
-                                    .replace(/#{width}/ig, width)
-                                    .replace(/#{height}/ig, height);
-            } else {
-                // 其他格式，如ogg mp4 webm
-                html = vedioTplH5.replace(/#{vedioUrl}/ig, url)
-                                 .replace(/#{width}/ig, width)
-                                 .replace(/#{height}/ig, height);
-            }
+            $link = $(link);
+
+            // 设置高度和宽度
+            $link.attr('width', width)
+                 .attr('height', height);
+
+            // 拼接字符串
+            html = html.replace('{content}', $div.append($link).html());
 
             // 执行命令
             editor.command(e, 'insertHtml', html);
-            $urlInput.val('');
+            $linkInput.val('');
         });
 
         // 创建panel
@@ -4714,7 +5472,8 @@ _e(function (E, $) {
     // 百度地图的key
     E.baiduMapAk = 'TVhjYjq1ICT2qqL5LdS8mwas';
 
-    var index = 1;
+    // 一个页面中，如果有多个编辑器，地图会出现问题。这个参数记录一下，如果超过 1 就提示
+    E.numberOfLocation = 0;
 
     E.createMenu(function (check) {
         var menuId = 'location';
@@ -4722,7 +5481,7 @@ _e(function (E, $) {
             return;
         }
 
-        if (index++ > 1) {
+        if (++E.numberOfLocation > 1) {
             E.error('目前不支持在一个页面多个编辑器上同时使用地图，可通过自定义菜单配置去掉地图菜单');
             return;
         }
@@ -4788,7 +5547,15 @@ _e(function (E, $) {
         };
 
         // load script 之后的 callback
+        var hasCallback = false;
         window.baiduMapCallBack = function(){
+            // 避免重复加载
+            if (hasCallback) {
+                return;
+            } else {
+                hasCallback = true;
+            }
+
             var BMap = window.BMap;
             if (!mapData.map) {
                 // 创建Map实例
@@ -4866,13 +5633,13 @@ _e(function (E, $) {
                 map.addOverlay(marker);  
                 marker.enableDragging();
                 mapData.markers.push(marker);  //加入到数组中
-            });
+            }, false);
         };
 
         mapData.loadMapScript = function () {
             var script = document.createElement("script");
             script.type = "text/javascript";
-            script.src = "http://api.map.baidu.com/api?v=2.0&ak=" + ak + "&callback=baiduMapCallBack";  // baiduMapCallBack是一个本地函数
+            script.src = "https://api.map.baidu.com/api?v=2.0&ak=" + ak + "&s=1&callback=baiduMapCallBack";  // baiduMapCallBack是一个本地函数
             try {
                 // IE10- 报错
                 document.body.appendChild(script);
@@ -5074,8 +5841,9 @@ _e(function (E, $) {
                 // 第一次，先加载地图
                 firstTime = true;
             }
-            mapData.initMap();
+            
             dropPanel.show();
+            mapData.initMap();
 
             if (!firstTime) {
                 $searchInput.focus();
@@ -5094,9 +5862,13 @@ _e(function (E, $) {
             // 不支持 IE8
             return;
         }
+        if (window.hljs) {
+            // 不要重复加载
+            return;
+        }
         var script = document.createElement("script");
         script.type = "text/javascript";
-        script.src = "http://apps.bdimg.com/libs/highlight.js/9.1.0/highlight.min.js";
+        script.src = "//cdn.bootcss.com/highlight.js/9.2.0/highlight.min.js";
         document.body.appendChild(script);
     }
     
@@ -5139,6 +5911,9 @@ _e(function (E, $) {
             // highlightjs 语言列表
             var hljs = window.hljs;
             if (hljs && hljs.listLanguages) {
+                if ($langSelect.children().length !== 0) {
+                    return;
+                }
                 $langSelect.css({
                     'margin-top': '9px',
                     'margin-left': '5px'
@@ -5266,12 +6041,23 @@ _e(function (E, $) {
                     return;
                 }
 
+                var rangeElem = editor.getRangeElem();
+                if ($.trim($(rangeElem).text())) {
+                    codeTpl = '<p><br></p>' + codeTpl;
+                }
+
                 var lang = $langSelect ? $langSelect.val() : ''; // 获取高亮语言
                 var langClass = '';
                 var doHightlight = function () {
-                    $('pre code').each(function(i, block) {
-                        if (window.hljs) {
+                    $txt.find('pre code').each(function (i, block) {
+                        var $block = $(block);
+                        if ($block.attr('codemark')) {
+                            // 有 codemark 标记的代码块，就不再重新格式化了
+                            return;
+                        } else if (window.hljs) {
+                            // 新代码块，格式化之后，立即标记 codemark
                             window.hljs.highlightBlock(block);
+                            $block.attr('codemark', '1');
                         }
                     });
                 };
@@ -5295,7 +6081,6 @@ _e(function (E, $) {
                 }
 
                 // ---- menu 选中状态 ----
-                var rangeElem = editor.getRangeElem();
                 var targetElem = editor.getSelfOrParentByName(rangeElem, 'pre');
                 var $targetElem;
                 if (targetElem) {
@@ -5385,18 +6170,37 @@ _e(function (E, $) {
         editor.menus[menuId] = menu;
 
 
-        // ------------ 初始化时、enter 时，做记录 ------------
+        // ------------ 初始化时、enter 时、打字中断时，做记录 ------------
+        // ------------ ctrl + z 是调用记录撤销，而不是使用浏览器默认的撤销 ------------
         editor.ready(function () {
             var editor = this;
             var $txt = editor.txt.$txt;
+            var timeoutId;
 
-            // enter 做记录
+            // 执行undo记录
+            function undo() {
+                editor.undoRecord();
+            }
+
             $txt.on('keydown', function (e) {
-                if (e.keyCode !== 13) {
-                    // 只监听 tab 按钮
+                var keyCode = e.keyCode;
+
+                // 撤销 ctrl + z
+                if (e.ctrlKey && keyCode === 90) {
+                    editor.undo();
                     return;
                 }
-                editor.undoRecord();
+
+                if (keyCode === 13) {
+                    // enter 做记录
+                    undo();
+                } else {
+                    // keyup 之后 1s 之内不操作，则做一次记录
+                    if (timeoutId) {
+                        clearTimeout(timeoutId);
+                    }
+                    timeoutId = setTimeout(undo, 1000);
+                }
             });
 
             // 初始化做记录
@@ -5436,19 +6240,24 @@ _e(function (E, $) {
 // 全屏 菜单
 _e(function (E, $) {
 
+    // 记录全屏时的scrollTop
+    var scrollTopWhenFullScreen;
+
     E.createMenu(function (check) {
         var menuId = 'fullscreen';
         if (!check(menuId)) {
             return;
         }
         var editor = this;
+        var $txt = editor.txt.$txt;
         var config = editor.config;
         var zIndexConfig = config.zindex || 10000;
         var lang = config.lang;
 
         var isSelected = false;
-        var txtHeight;
         var zIndex;
+
+        var maxHeight;
 
         // 创建 menu 对象
         var menu = new E.Menu({
@@ -5467,12 +6276,29 @@ _e(function (E, $) {
             zIndex = $editorContainer.css('z-index');
             $editorContainer.css('z-index', zIndexConfig);
 
-            // 记录高度
-            var $txt = editor.txt.$txt;
-            txtHeight = $txt.height();
-            // 重新设置高度
+            var $wrapper;
+            var txtHeight = $txt.height();
+            var txtOuterHeight = $txt.outerHeight();
+
+            if (editor.useMaxHeight) {
+                // 记录 max-height，并暂时去掉maxheight
+                maxHeight = $txt.css('max-height');
+                $txt.css('max-height', 'none');
+
+                // 如果使用了maxHeight， 将$txt从它的父元素中移出来
+                $wrapper = $txt.parent();
+                $wrapper.after($txt);
+                $wrapper.remove();
+                $txt.css('overflow-y', 'auto');
+            }
+
+            // 设置高度到全屏
             var menuContainer = editor.menuContainer;
-            $txt.height(E.$window.height() - menuContainer.height());
+            $txt.height(
+                E.$window.height() - 
+                menuContainer.height() - 
+                (txtOuterHeight - txtHeight)  // 去掉内边距和外边距
+            );
 
             // 取消menuContainer的内联样式（menu吸顶时，会为 menuContainer 设置一些内联样式）
             editor.menuContainer.$menuContainer.attr('style', '');
@@ -5482,6 +6308,9 @@ _e(function (E, $) {
 
             // 记录编辑器是否全屏
             editor.isFullScreen = true;
+
+            // 记录设置全屏时的高度
+            scrollTopWhenFullScreen = E.$window.scrollTop();
         };
 
         // 定义选中状态的 click 事件
@@ -5491,17 +6320,27 @@ _e(function (E, $) {
             $editorContainer.removeClass('wangEditor-fullscreen');
             $editorContainer.css('z-index', zIndex);
 
-            // 还原高度
-            var $txt = editor.txt.$txt;
-            if (txtHeight) {
-                $txt.height(txtHeight);
+            // 还原height
+            if (editor.useMaxHeight) {
+                $txt.css('max-height', maxHeight);
+            } else {
+                // editor.valueContainerHeight 在 editor.txt.initHeight() 中事先保存了
+                editor.$valueContainer.css('height', editor.valueContainerHeight);
             }
+
+            // 重新计算高度
+            editor.txt.initHeight();
 
             // 保存状态
             isSelected = false;
 
             // 记录编辑器是否全屏
             editor.isFullScreen = false;
+
+            // 还原scrollTop
+            if (scrollTopWhenFullScreen != null) {
+                E.$window.scrollTop(scrollTopWhenFullScreen);
+            }
         };
 
         // 定义选中事件
@@ -5653,8 +6492,61 @@ _e(function (E, $) {
     };
 
 });
+// 上传图片事件
+_e(function (E, $) {
+
+    E.plugin(function () {
+        var editor = this;
+        var fns = editor.config.uploadImgFns; // editor.config.uploadImgFns = {} 在config文件中定义了
+
+        // -------- 定义load函数 --------
+        fns.onload || (fns.onload = function (resultText, xhr) {
+            E.log('上传结束，返回结果为 ' + resultText);
+
+            var editor = this;
+            var originalName = editor.uploadImgOriginalName || '';  // 上传图片时，已经将图片的名字存在 editor.uploadImgOriginalName
+            var img;
+            if (resultText.indexOf('error|') === 0) {
+                // 提示错误
+                E.warn('上传失败：' + resultText.split('|')[1]);
+                alert(resultText.split('|')[1]);
+            } else {
+                E.log('上传成功，即将插入编辑区域，结果为：' + resultText);
+
+                // 将结果插入编辑器
+                img = document.createElement('img');
+                img.onload = function () {
+                    var html = '<img src="' + resultText + '" alt="' + originalName + '" style="max-width:100%;"/>';
+                    editor.command(null, 'insertHtml', html);
+
+                    E.log('已插入图片，地址 ' + resultText);
+                    img = null;
+                };
+                img.onerror = function () {
+                    E.error('使用返回的结果获取图片，发生错误。请确认以下结果是否正确：' + resultText);
+                    img = null;
+                };
+                img.src = resultText;
+            }
+
+        });
+
+        // -------- 定义tiemout函数 --------
+        fns.ontimeout || (fns.ontimeout = function (xhr) {
+            E.error('上传图片超时');
+            alert('上传图片超时');
+        });
+
+        // -------- 定义error函数 --------
+        fns.onerror || (fns.onerror = function (xhr) {
+            E.error('上传上图片发生错误');
+            alert('上传上图片发生错误');
+        });
+
+    });
+});
 // xhr 上传图片
-(function (window, E, $) {
+_e(function (E, $) {
 
     if (!window.FileReader || !window.FormData) {
         // 如果不支持html5的文档操作，直接返回
@@ -5667,6 +6559,12 @@ _e(function (E, $) {
         var config = editor.config;
         var uploadImgUrl = config.uploadImgUrl;
         var uploadTimeout = config.uploadTimeout;
+
+        // 获取配置中的上传事件
+        var uploadImgFns = config.uploadImgFns;
+        var onload = uploadImgFns.onload;
+        var ontimeout = uploadImgFns.ontimeout;
+        var onerror = uploadImgFns.onerror;
 
         if (!uploadImgUrl) {
             return;
@@ -5709,7 +6607,7 @@ _e(function (E, $) {
         function updateProgress(e) {
             if (e.lengthComputable) {
                 var percentComplete = e.loaded / e.total;
-                editor.showUploadProgress(percentComplete);
+                editor.showUploadProgress(percentComplete * 100);
             }
         }
 
@@ -5717,17 +6615,27 @@ _e(function (E, $) {
         editor.xhrUploadImg = function (opt) {
             // opt 数据
             var event = opt.event;
+            var fileName = opt.filename || '';
             var base64 = opt.base64;
-            var fileType = opt.fileType || 'image/png';  // 无扩展名，用png
+            var fileType = opt.fileType || 'image/png'; // 无扩展名则默认使用 png
             var name = opt.name || 'wangEditor_upload_file';
-            var successFn = opt.successFn;
-            var errorFn = opt.errorFn;
-            var timeoutFn = opt.timeoutFn;
-            var failedFn = opt.failedFn;
+            var loadfn = opt.loadfn || onload;
+            var errorfn = opt.errorfn || onerror;
+            var timeoutfn = opt.timeoutfn || ontimeout;
+
+            // 上传参数（如 token）
+            var params = editor.config.uploadParams || {};
+
+            // headers
+            var headers = editor.config.uploadHeaders || {};
 
             // 获取文件扩展名
             var fileExt = 'png';  // 默认为 png
-            if (fileType.indexOf('/') > 0 && fileType.split('/')[1]) {
+            if (fileName.indexOf('.') > 0) {
+                // 原来的文件名有扩展名
+                fileExt = fileName.slice(fileName.lastIndexOf('.') - fileName.length + 1);
+            } else if (fileType.indexOf('/') > 0 && fileType.split('/')[1]) {
+                // 文件名没有扩展名，通过类型获取，如从 'image/png' 取 'png'
                 fileExt = fileType.split('/')[1];
             }
 
@@ -5757,13 +6665,8 @@ _e(function (E, $) {
                 // 超时了就阻止默认行为
                 event.preventDefault();
 
-                // 执行回调函数
-                if (timeoutFn) {
-                    timeoutFn.call(editor);
-                }
-
-                E.log('上传超时，超时时间 ' + uploadTimeout);
-                alert('图片上传超时');
+                // 执行回调函数，提示什么内容，都应该在回调函数中定义
+                timeoutfn && timeoutfn.call(editor, xhr);
 
                 // 隐藏进度条
                 editor.hideUploadProgress();
@@ -5774,30 +6677,14 @@ _e(function (E, $) {
                     clearTimeout(timeoutId);
                 }
 
-                // 服务器端要返回图片url地址
-                var resultSrc = xhr.responseText;
-                E.log('上传完成，返回结果为 ' + resultSrc);
-
-                if (resultSrc.indexOf('error|') === 0) {
-                    // 提示错误
-                    E.warn('上传失败：' + resultSrc.split('|')[1]);
-
-                    // 执行回调函数
-                    if (failedFn) {
-                        failedFn.call(editor);
-                    }
-
-                    alert(resultSrc.split('|')[1]);
-                } else {
-                    E.log('上传成功，即将插入编辑区域，结果为：' + resultSrc);
-                    // 将结果插入编辑器
-                    insertImg(resultSrc, event);
-
-                    // 执行回调函数
-                    if (successFn) {
-                        successFn.call(editor);
-                    }
+                // 记录文件名到 editor.uploadImgOriginalName ，插入图片时，可做 alt 属性用
+                editor.uploadImgOriginalName = fileName;
+                if (fileName.indexOf('.') > 0) {
+                    editor.uploadImgOriginalName = fileName.split('.')[0];
                 }
+
+                // 执行load函数，任何操作，都应该在load函数中定义
+                loadfn && loadfn.call(editor, xhr.responseText, xhr);
 
                 // 隐藏进度条
                 editor.hideUploadProgress();
@@ -5810,13 +6697,8 @@ _e(function (E, $) {
                 // 超时了就阻止默认行为
                 event.preventDefault();
 
-                E.error('发生错误');
-                alert('发生错误');
-
-                // 执行回调函数
-                if (errorFn) {
-                    errorFn.call(editor);
-                }
+                // 执行error函数，错误提示，应该在error函数中定义
+                errorfn && errorfn.call(editor, xhr);
 
                 // 隐藏进度条
                 editor.hideUploadProgress();
@@ -5827,18 +6709,33 @@ _e(function (E, $) {
             // 填充数据
             formData.append(name, convertBase64UrlToBlob(base64, fileType), E.random() + '.' + fileExt);
 
+            // 添加参数
+            $.each(params, function (key, value) {
+                formData.append(key, value);
+            });
+
             // 开始上传
             xhr.open('POST', uploadImgUrl, true);
+            // xhr.setRequestHeader("Content-type","application/x-www-form-urlencoded");  // 将参数解析成传统form的方式上传
+
+            // 修改自定义配置的headers
+            $.each(headers, function (key, value) {
+                xhr.setRequestHeader(key, value);
+            });
+
+            // 跨域上传时，传cookie
+            xhr.withCredentials = true;
+
+            // 发送数据
             xhr.send(formData);
             timeoutId = setTimeout(timeoutCallback, uploadTimeout);
 
             E.log('开始上传...并开始超时计算');
         };
     });
-
-})(window, window.wangEditor, window.jQuery);
+});
 // 进度条
-(function (window, E, $) {
+_e(function (E, $) {
 
     E.plugin(function () {
 
@@ -5848,19 +6745,32 @@ _e(function (E, $) {
         var $editorContainer = editor.$editorContainer;
         var width = $editorContainer.width();
         var $progress = $('<div class="wangEditor-upload-progress"></div>');
-        
-        $progress.css({
-            top: menuHeight + 'px'
-        });
-        $editorContainer.append($progress);
+
+        // 渲染事件
+        var isRender = false;
+        function render() {
+            if (isRender) {
+                return;
+            }
+            isRender = true;
+
+            $progress.css({
+                top: menuHeight + 'px'
+            });
+            $editorContainer.append($progress);
+        }
 
         // ------ 显示进度 ------
-        editor.showUploadProgress = function (pregress) {
+        editor.showUploadProgress = function (progress) {
             if (timeoutId) {
                 clearTimeout(timeoutId);
             }
+
+            // 显示之前，先判断是否渲染
+            render();
+
             $progress.show();
-            $progress.width(pregress * width);
+            $progress.width(progress * width / 100);
         };
 
         // ------ 隐藏进度条 ------
@@ -5877,10 +6787,9 @@ _e(function (E, $) {
             timeoutId = setTimeout(hideProgress, time);
         };
     });
-
-})(window, window.wangEditor, window.jQuery);
+});
 // upload img 插件
-(function (window, E, $) {
+_e(function (E, $) {
 
     E.plugin(function () {
         var editor = this;
@@ -5917,9 +6826,9 @@ _e(function (E, $) {
             upfile.selectFiles();
         });
     });
-
-})(window, window.wangEditor, window.jQuery);
-(function (window, E, $) {
+});
+// h5 方式上传图片
+_e(function (E, $) {
 
     if (!window.FileReader || !window.FormData) {
         // 如果不支持html5的文档操作，直接返回
@@ -6011,7 +6920,18 @@ _e(function (E, $) {
         var editor = self.editor;
         var filename = file.name || '';
         var fileType = file.type || '';
+        var uploadImgFns = editor.config.uploadImgFns;
+        var uploadFileName = editor.config.uploadImgFileName || 'wangEditorH5File';
+        var onload = uploadImgFns.onload;
+        var ontimeout = uploadImgFns.ontimeout;
+        var onerror = uploadImgFns.onerror;
         var reader = new FileReader();
+
+        if (!onload || !ontimeout || !onerror) {
+            E.error('请为编辑器配置上传图片的 onload ontimeout onerror 回调事件');
+            return;
+        }
+
 
         E.log('开始执行 ' + filename + ' 文件的上传');
 
@@ -6027,23 +6947,34 @@ _e(function (E, $) {
             var base64 = e.target.result || this.result;
             editor.xhrUploadImg({
                 event: e,
+                filename: filename,
                 base64: base64,
                 fileType: fileType,
-                name: 'wangEditorH5File',
-                successFn: clearInput,
-                errorFn: function () {
+                name: uploadFileName,
+                loadfn: function (resultText, xhr) {
+                    clearInput();
+                    // 执行配置中的方法
+                    var editor = this;
+                    onload.call(editor, resultText, xhr);
+                },
+                errorfn: function (xhr) {
                     clearInput();
                     if (E.isOnWebsite) {
                         alert('wangEditor官网暂时没有服务端，因此报错。实际项目中不会发生');
                     }
+                    // 执行配置中的方法
+                    var editor = this;
+                    onerror.call(editor, xhr);
                 },
-                timeoutFn: function () {
+                timeoutfn: function (xhr) {
                     clearInput();
                     if (E.isOnWebsite) {
                         alert('wangEditor官网暂时没有服务端，因此超时。实际项目中不会发生');
                     }
-                },
-                failedFn: clearInput
+                    // 执行配置中的方法
+                    var editor = this;
+                    ontimeout(editor, xhr);
+                }
             });
         };
 
@@ -6054,8 +6985,9 @@ _e(function (E, $) {
     // 暴露给 E
     E.UploadFile = UploadFile;
 
-})(window, window.wangEditor, window.jQuery);
-(function (window, E, $) {
+});
+// form方式上传图片
+_e(function (E, $) {
 
     if (window.FileReader && window.FormData) {
         // 如果支持 html5 上传，则返回
@@ -6079,43 +7011,126 @@ _e(function (E, $) {
         E.log('input value 已清空');
     };
 
+    // 隐藏modal
+    UploadFile.fn.hideModal = function () {
+        this.modal.hide();
+    };
+
     // 渲染
     UploadFile.fn.render = function () {
         var self = this;
+        var editor = self.editor;
+        var uploadFileName = editor.config.uploadImgFileName || 'wangEditorFormFile';
         if (self._hasRender) {
             // 不要重复渲染
             return;
         }
 
+        // 服务器端路径
         var uploadUrl = self.uploadUrl;
 
         E.log('渲染dom');
 
+        // 创建 form 和 iframe
         var iframeId = 'iframe' + E.random();
         var $iframe = $('<iframe name="' + iframeId + '" id="' + iframeId + '" frameborder="0" width="0" height="0"></iframe>');
         var multiple = self.multiple;
         var multipleTpl = multiple ? 'multiple="multiple"' : '';
-        var $input = $('<input type="file" ' + multipleTpl + ' name="wangEditorFormFile"/>');
+        var $p = $('<p>选择图片并上传</p>');
+        var $input = $('<input type="file" ' + multipleTpl + ' name="' + uploadFileName + '"/>');
+        var $btn = $('<input type="submit" value="上传"/>');
         var $form = $('<form enctype="multipart/form-data" method="post" action="' + uploadUrl + '" target="' + iframeId + '"></form>');
-        var $container = $('<div style="visibility:hidden;"></div>');
+        var $container = $('<div style="margin:10px 20px;"></div>');
 
-        $form.append($input).append($('<input type="submit" value="form-img-submit"/>'));
-        $container.append($form);
-        $container.append($iframe);
-        E.$body.append($container);
+        $form.append($p).append($input).append($btn);
 
-        // onchange 事件
-        $input.on('change', function (e) {
-            self.selected(e, $input.get(0));
+        // 增加用户配置的参数，如 token
+        $.each(editor.config.uploadParams, function (key, value) {
+            $form.append( $('<input type="hidden" name="' + key + '" value="' + value + '"/>') );
         });
 
-        // 记录对象数据
+        $container.append($form);
+        $container.append($iframe);
+
         self.$input = $input;
-        self.$form = $form;
         self.$iframe = $iframe;
+
+        // 生成 modal
+        var modal = new E.Modal(editor, undefined, {
+            $content: $container
+        });
+        self.modal = modal;
 
         // 记录
         self._hasRender = true;
+    };
+
+    // 绑定 iframe load 事件
+    UploadFile.fn.bindLoadEvent = function () {
+        var self = this;
+        if (self._hasBindLoad) {
+            // 不要重复绑定
+            return;
+        }
+
+        var editor = self.editor;
+        var $iframe = self.$iframe;
+        var iframe = $iframe.get(0);
+        var iframeWindow = iframe.contentWindow;
+        var onload = editor.config.uploadImgFns.onload;
+
+        // 定义load事件
+        function onloadFn() {
+            var resultText = $.trim(iframeWindow.document.body.innerHTML);
+            if (!resultText) {
+                return;
+            }
+
+            // 获取文件名
+            var fileFullName = self.$input.val();  // 结果如 C:\folder\abc.png 格式
+            var fileOriginalName = fileFullName;
+            if (fileFullName.lastIndexOf('\\') >= 0) {
+                // 获取 abc.png 格式
+                fileOriginalName = fileFullName.slice(fileFullName.lastIndexOf('\\') + 1);
+                if (fileOriginalName.indexOf('.') > 0) {
+                    // 获取 abc （即不带扩展名的文件名）
+                    fileOriginalName = fileOriginalName.split('.')[0];
+                }
+            }
+
+            // 将文件名暂存到 editor.uploadImgOriginalName ，插入图片时，可作为 alt 属性来用
+            editor.uploadImgOriginalName = fileOriginalName;
+
+            // 执行load函数，插入图片的操作，应该在load函数中执行
+            onload.call(editor, resultText);
+
+            // 清空 input 数据
+            self.clear();
+
+            // 隐藏modal
+            self.hideModal();
+        }
+
+        // 绑定 load 事件
+        if (iframe.attachEvent) {
+            iframe.attachEvent('onload', onloadFn);
+        } else {
+            iframe.onload = onloadFn;
+        }
+
+        // 记录
+        self._hasBindLoad = true;
+    };
+
+    UploadFile.fn.show = function () {
+        var self = this;
+        var modal = self.modal;
+
+        function show() {
+            modal.show();
+            self.bindLoadEvent();
+        }
+        setTimeout(show);
     };
 
     // 选择
@@ -6127,88 +7142,19 @@ _e(function (E, $) {
         // 先渲染
         self.render();
 
-        // 选择
-        E.log('选择文件');
-        self.$input.click();
-    };
+        // 先清空
+        self.clear();
 
-    // 选中文件之后
-    UploadFile.fn.selected = function (e, input) {
-        var self = this;
-        var editor = self.editor;
-        var $iframe = self.$iframe;
-        var iframe = $iframe.get(0);
-        var iframeWindow = iframe.contentWindow;
-        var $form = self.$form;
-        var timeout = self.timeout;
-        var timeoutId;
-
-        // 判断扩展名
-        var value = input.value.toLowerCase();
-        var fileExt = value.slice((value.lastIndexOf('.')) - value.length);
-        if (['.gif', '.jpg', 'jpeg', 'bmp', 'png'].indexOf(fileExt) < 0) {
-            alert('选择的文件不是图片');
-            self.clear();
-            return;
-        }
-
-
-        // 超时处理
-        function timeoutCallback() {
-            iframeWindow.onload = null;
-
-            E.log('上传超时，已终止操作。超时时间为 ' + timeout);
-
-            // 清空 input 数据
-            self.clear();
-        }
-
-        // iframe onload 事件
-        iframe.onload = function () {
-            if (timeoutId) {
-                clearTimeout(timeoutId);
-            }
-            var resultSrc = iframeWindow.document.body.innerHTML;
-            var img;
-
-            E.log('上传结束，返回结果为 ' + resultSrc);
-
-            if (resultSrc.indexOf('error|') === 0) {
-                // 提示错误
-                E.log('上传失败：' + resultSrc.split('|')[1]);
-                alert(resultSrc.split('|')[1]);
-            } else {
-                E.log('上传成功，开始下载');
-                img = document.createElement('img');
-                img.onload = function () {
-                    var html = '<img src="' + resultSrc + '" style="max-width:100%"/>';
-                    editor.command(event, 'insertHtml', html);
-                    img = null;
-                };
-                img.onerror = function () {
-                    E.error('使用返回的结果获取图片，发生错误。请确认以下结果是否正确：' + resultSrc);
-                    img = null;
-                };
-                img.src = resultSrc;
-            }
-
-            // 清空 input 数据
-            self.clear();
-        };
-
-        E.log('提交form，并开始超时计算，等待返回结果...');
-        $form.submit();
-        timeoutId = setTimeout(timeoutCallback, timeout);
-
-        return false;
+        // 显示
+        self.show();
     };
 
     // 暴露给 E
     E.UploadFile = UploadFile;
 
-})(window, window.wangEditor, window.jQuery);
+});
 // upload img 插件 粘贴图片
-(function (window, E, $) {
+_e(function (E, $) {
     
     E.plugin(function () {
         var editor = this;
@@ -6216,6 +7162,7 @@ _e(function (E, $) {
         var $txt = txt.$txt;
         var config = editor.config;
         var uploadImgUrl = config.uploadImgUrl;
+        var uploadFileName = config.uploadImgFileName || 'wangEditorPasteFile';
         var pasteEvent;
         var $imgsBeforePaste;
 
@@ -6262,7 +7209,7 @@ _e(function (E, $) {
                         event: pasteEvent,
                         base64: base64,
                         fileType: type,
-                        name: 'wangEditorPasteFile'
+                        name: uploadFileName
                     });
                 } else {
                     E.log('src 为 ' + base64 + ' ，不是 base64 格式，暂时不支持上传');
@@ -6286,7 +7233,7 @@ _e(function (E, $) {
             if (data == null) {
                 text = window.clipboardData && window.clipboardData.getData('text');
             } else {
-                text = data.getData('text');
+                text = data.getData('text/plain') || data.getData('text/html');
             }
             if (text) {
                 return;
@@ -6318,7 +7265,7 @@ _e(function (E, $) {
                             event: pasteEvent,
                             base64: base64,
                             fileType: fileType,
-                            name: 'wangEditorPasteFile'
+                            name: uploadFileName
                         });
                     };
 
@@ -6340,10 +7287,9 @@ _e(function (E, $) {
         });
 
     });
-
-})(window, window.wangEditor, window.jQuery);
+});
 // 拖拽上传图片 插件 
-(function (window, E, $) {
+_e(function (E, $) {
 
     E.plugin(function () {
 
@@ -6352,6 +7298,7 @@ _e(function (E, $) {
         var $txt = txt.$txt;
         var config = editor.config;
         var uploadImgUrl = config.uploadImgUrl;
+        var uploadFileName = config.uploadImgFileName || 'wangEditorDragFile';
 
         // 未配置上传图片url，则忽略
         if (!uploadImgUrl) {
@@ -6395,7 +7342,7 @@ _e(function (E, $) {
                         event: dragEvent,
                         base64: base64,
                         fileType: type,
-                        name: 'wangEditorDragFile'
+                        name: uploadFileName
                     });
                 };
 
@@ -6406,14 +7353,16 @@ _e(function (E, $) {
         });
     });
 
-})(window, window.wangEditor, window.jQuery);
+});
 // 编辑器区域 table toolbar
-(function (window, E, $) {
+_e(function (E, $) {
 
     E.plugin(function () {
         var editor = this;
         var txt = editor.txt;
         var $txt = txt.$txt;
+        // 说明：设置了 max-height 之后，$txt.parent() 负责滚动处理
+        var $currentTxt = editor.useMaxHeight ? $txt.parent() : $txt;
         var $currentTable;
 
         // 用到的dom节点
@@ -6489,6 +7438,10 @@ _e(function (E, $) {
 
         // 显示 toolbar
         function show() {
+            if (editor._disabled) {
+                // 编辑器已经被禁用，则不让显示
+                return;
+            }
             if ($currentTable == null) {
                 return;
             }
@@ -6506,8 +7459,8 @@ _e(function (E, $) {
             var left = tableLeft;
             var marginLeft = 0;
 
-            var txtTop = $txt.position().top;
-            var txtHeight = $txt.outerHeight();
+            var txtTop = $currentTxt.position().top;
+            var txtHeight = $currentTxt.outerHeight();
             if (top > (txtTop + txtHeight)) {
                 // top 不得超出编辑范围
                 top = txtTop + txtHeight;
@@ -6526,6 +7479,14 @@ _e(function (E, $) {
                 left: left,
                 'margin-left': marginLeft
             });
+            // 如果定位太靠左了
+            if (marginLeft < 0) {
+                // 得到三角形的margin-left
+                $toolbar.css('margin-left', '0');
+                $triangle.hide();
+            } else {
+                $triangle.show();
+            }
         }
         
         // 隐藏 toolbar
@@ -6539,7 +7500,7 @@ _e(function (E, $) {
         }
 
         // click table 事件
-        $txt.on('click', 'table', function (e) {
+        $currentTxt.on('click', 'table', function (e) {
             var $table = $(e.currentTarget);
 
             // 渲染
@@ -6558,17 +7519,17 @@ _e(function (E, $) {
             e.preventDefault();
             e.stopPropagation();
             
-        }).on('click keypress scroll', function (e) {
+        }).on('click keydown scroll', function (e) {
             setTimeout(hide, 100);
         });
-        E.$body.on('click keypress scroll', function (e) {
+        E.$body.on('click keydown scroll', function (e) {
             setTimeout(hide, 100);
         });
     });
 
-})(window, window.wangEditor, window.jQuery);
+});
 // 编辑器区域 img toolbar
-(function (window, E, $) {
+_e(function (E, $) {
 
     if (E.userAgent.indexOf('MSIE 8') > 0) {
         return;
@@ -6576,22 +7537,97 @@ _e(function (E, $) {
     
     E.plugin(function () {
         var editor = this;
+        var lang = editor.config.lang;
         var txt = editor.txt;
         var $txt = txt.$txt;
+        // 说明：设置了 max-height 之后，$txt.parent() 负责滚动处理
+        var $currentTxt = editor.useMaxHeight ? $txt.parent() : $txt;
         var $editorContainer = editor.$editorContainer;
         var $currentImg;
+        var currentLink = '';
 
         // 用到的dom节点
         var isRendered = false;
         var $dragPoint = $('<div class="img-drag-point"></div>');
+
         var $toolbar = $('<div class="txt-toolbar"></div>');
         var $triangle = $('<div class="tip-triangle"></div>');
+
+        var $menuContainer = $('<div></div>');
         var $delete = $('<a href="#"><i class="wangeditor-menu-img-trash-o"></i></a>');
         var $zoomSmall = $('<a href="#"><i class="wangeditor-menu-img-search-minus"></i></a>');
         var $zoomBig = $('<a href="#"><i class="wangeditor-menu-img-search-plus"></i></a>');
-        var $floatLeft = $('<a href="#"><i class="wangeditor-menu-img-align-left"></i></a>');
-        var $noFloat = $('<a href="#"><i class="wangeditor-menu-img-align-justify"></i></a>');
-        var $floatRight = $('<a href="#"><i class="wangeditor-menu-img-align-right"></i></a>');
+        // var $floatLeft = $('<a href="#"><i class="wangeditor-menu-img-align-left"></i></a>');
+        // var $noFloat = $('<a href="#"><i class="wangeditor-menu-img-align-justify"></i></a>');
+        // var $floatRight = $('<a href="#"><i class="wangeditor-menu-img-align-right"></i></a>');
+        var $alignLeft = $('<a href="#"><i class="wangeditor-menu-img-align-left"></i></a>');
+        var $alignCenter = $('<a href="#"><i class="wangeditor-menu-img-align-center"></i></a>');
+        var $alignRight = $('<a href="#"><i class="wangeditor-menu-img-align-right"></i></a>');
+        var $link = $('<a href="#"><i class="wangeditor-menu-img-link"></i></a>');
+        var $unLink = $('<a href="#"><i class="wangeditor-menu-img-unlink"></i></a>');
+
+        var $linkInputContainer = $('<div style="display:none;"></div>');
+        var $linkInput = $('<input type="text" style="height:26px; margin-left:10px; width:200px;"/>');
+        var $linkBtnSubmit = $('<button class="right">' + lang.submit + '</button>');
+        var $linkBtnCancel = $('<button class="right gray">' + lang.cancel + '</button>');
+
+        // 记录是否正在拖拽
+        var isOnDrag = false;
+
+        // 获取 / 设置 链接
+        function imgLink(e, url) {
+            if (!$currentImg) {
+                return;
+            }
+            var commandFn;
+            var callback = function () {
+                // 及时保存currentLink
+                if (url != null) {
+                    currentLink = url;
+                }
+            };
+            var $link;
+            var inLink = false;
+            var $parent = $currentImg.parent();
+            if ($parent.get(0).nodeName.toLowerCase() === 'a') {
+                // 父元素就是图片链接
+                $link = $parent;
+                inLink = true;
+            } else {
+                // 父元素不是图片链接，则重新创建一个链接
+                $link = $('<a target="_blank"></a>');
+            }
+
+            if (url == null) {
+                // url 无值，是获取链接
+                return $link.attr('href') || '';
+            } else if (url === '') {
+                // url 是空字符串，是取消链接
+                if (inLink) {
+                    commandFn = function () {
+                        $currentImg.unwrap();
+                    };
+                }
+            } else {
+                // url 有值，是设置链接
+                if (url === currentLink) {
+                    return;
+                }
+                commandFn = function () {
+                    $link.attr('href', url);
+
+                    if (!inLink) {
+                        // 当前图片未包含在链接中，则包含进来
+                        $currentImg.wrap($link);
+                    }
+                };
+            }
+
+            // 执行命令
+            if (commandFn) {
+                editor.customCommand(e, commandFn, callback);
+            }
+        }
 
         // 渲染到页面
         function render() {
@@ -6603,14 +7639,29 @@ _e(function (E, $) {
             bindToolbarEvent();
             bindDragEvent();
 
+            // 菜单放入 container
+            $menuContainer.append($delete)
+                            .append($zoomSmall)
+                            .append($zoomBig)
+                            // .append($floatLeft)
+                            // .append($noFloat)
+                            // .append($floatRight);
+                            .append($alignLeft)
+                            .append($alignCenter)
+                            .append($alignRight)
+                            .append($link)
+                            .append($unLink);
+
+            // 链接input放入container
+            $linkInputContainer.append($linkInput)
+                               .append($linkBtnCancel)
+                               .append($linkBtnSubmit);
+
             // 拼接 渲染到页面上
             $toolbar.append($triangle)
-                    .append($delete)
-                    .append($zoomSmall)
-                    .append($zoomBig)
-                    .append($floatLeft)
-                    .append($noFloat)
-                    .append($floatRight);
+                    .append($menuContainer)
+                    .append($linkInputContainer);
+                    
             editor.$editorContainer.append($toolbar).append($dragPoint);
             isRendered = true;
         }
@@ -6619,7 +7670,7 @@ _e(function (E, $) {
         function bindToolbarEvent() {
             // 统一执行命令的方法
             var commandFn;
-            function command(e, callback) {
+            function customCommand(e, callback) {
                 if (commandFn) {
                     editor.customCommand(e, commandFn, callback);
                 }
@@ -6627,10 +7678,14 @@ _e(function (E, $) {
 
             // 删除
             $delete.click(function (e) {
+                // 删除之前先unlink
+                imgLink(e, '');
+
+                // 删除图片
                 commandFn = function () {
                     $currentImg.remove();
                 };
-                command(e, function () {
+                customCommand(e, function () {
                     setTimeout(hide, 100);
                 });
             });
@@ -6649,7 +7704,7 @@ _e(function (E, $) {
                         height: height + 'px'
                     });
                 };
-                command(e, function () {
+                customCommand(e, function () {
                     setTimeout(show);
                 });
             });
@@ -6668,45 +7723,131 @@ _e(function (E, $) {
                         height: height + 'px'
                     });
                 };
-                command(e, function () {
+                customCommand(e, function () {
                     setTimeout(show);
                 });
             });
 
-            // 左浮动
-            $floatLeft.click(function (e) {
+            // // 左浮动
+            // $floatLeft.click(function (e) {
+            //     commandFn = function () {
+            //         $currentImg.css({
+            //             float: 'left'
+            //         });
+            //     };
+            //     customCommand(e, function () {
+            //         setTimeout(hide, 100);
+            //     });
+            // });
+
+            // alignLeft
+            $alignLeft.click(function (e) {
                 commandFn = function () {
-                    $currentImg.css({
-                        float: 'left'
-                    });
+                    // 如果 img 增加了链接，那么 img.parent() 就是 a 标签，设置 align 没用的，因此必须找到 P 父节点来设置 align
+                    $currentImg.parents('p').css({
+                        'text-align': 'left'
+                    }).attr('align', 'left');
                 };
-                command(e, function () {
+                customCommand(e, function () {
                     setTimeout(hide, 100);
                 });
             });
 
-            // 右浮动
-            $floatRight.click(function (e) {
+            // // 右浮动
+            // $floatRight.click(function (e) {
+            //     commandFn = function () {
+            //         $currentImg.css({
+            //             float: 'right'
+            //         });
+            //     };
+            //     customCommand(e, function () {
+            //         setTimeout(hide, 100);
+            //     });
+            // });
+
+            // alignRight
+            $alignRight.click(function (e) {
                 commandFn = function () {
-                    $currentImg.css({
-                        float: 'right'
-                    });
+                    // 如果 img 增加了链接，那么 img.parent() 就是 a 标签，设置 align 没用的，因此必须找到 P 父节点来设置 align
+                    $currentImg.parents('p').css({
+                        'text-align': 'right'
+                    }).attr('align', 'right');
                 };
-                command(e, function () {
+                customCommand(e, function () {
                     setTimeout(hide, 100);
                 });
             });
 
-            // 无浮动
-            $noFloat.click(function (e) {
+            // // 无浮动
+            // $noFloat.click(function (e) {
+            //     commandFn = function () {
+            //         $currentImg.css({
+            //             float: 'none'
+            //         });
+            //     };
+            //     customCommand(e, function () {
+            //         setTimeout(hide, 100);
+            //     });
+            // });
+
+            // alignCenter
+            $alignCenter.click(function (e) {
                 commandFn = function () {
-                    $currentImg.css({
-                        float: 'none'
-                    });
+                    // 如果 img 增加了链接，那么 img.parent() 就是 a 标签，设置 align 没用的，因此必须找到 P 父节点来设置 align
+                    $currentImg.parents('p').css({
+                        'text-align': 'center'
+                    }).attr('align', 'center');
                 };
-                command(e, function () {
+                customCommand(e, function () {
                     setTimeout(hide, 100);
                 });
+            });
+
+            // link
+            // 显示链接input
+            $link.click(function (e) {
+                e.preventDefault();
+
+                // 获取当前链接，并显示
+                currentLink = imgLink(e);
+                $linkInput.val(currentLink);
+
+                $menuContainer.hide();
+                $linkInputContainer.show();
+            });
+            // 设置链接
+            $linkBtnSubmit.click(function (e) {
+                e.preventDefault();
+
+                var url = $.trim($linkInput.val());
+                if (url) {
+                    // 设置链接，同时会自动更新 currentLink 的值
+                    imgLink(e, url);
+                }
+
+                // 隐藏 toolbar
+                setTimeout(hide);
+            });
+            // 取消设置链接
+            $linkBtnCancel.click(function (e) {
+                e.preventDefault();
+
+                // 重置链接 input
+                $linkInput.val(currentLink);
+
+                $menuContainer.show();
+                $linkInputContainer.hide();
+            });
+
+            // unlink
+            $unLink.click(function (e) {
+                e.preventDefault();
+
+                // 执行 unlink
+                imgLink(e, '');
+
+                // 隐藏 toolbar
+                setTimeout(hide);
             });
         }
 
@@ -6716,7 +7857,7 @@ _e(function (E, $) {
             var dragMarginLeft, dragMarginTop;
             var imgWidth, imgHeight;
 
-            function mousemove(e) {
+            function mousemove (e) {
                 var diffX, diffY;
 
                 // 计算差额
@@ -6734,7 +7875,7 @@ _e(function (E, $) {
                 // --------- 计算图片的大小 ---------
                 var currentImgWidth = imgWidth + diffX;
                 var currentImggHeight = imgHeight + diffY;
-                $currentImg.css({
+                $currentImg && $currentImg.css({
                     width: currentImgWidth,
                     height: currentImggHeight
                 });
@@ -6772,12 +7913,22 @@ _e(function (E, $) {
                         'margin-left': dragMarginLeft,
                         'margin-top': dragMarginTop
                     });
+
+                    // 记录
+                    isOnDrag = false;
                 });
+
+                // 记录
+                isOnDrag = true;
             });
         }
 
         // 显示 toolbar
         function show() {
+            if (editor._disabled) {
+                // 编辑器已经被禁用，则不让显示
+                return;
+            }
             if ($currentImg == null) {
                 return;
             }
@@ -6787,6 +7938,7 @@ _e(function (E, $) {
             var imgLeft = imgPosition.left;
             var imgHeight = $currentImg.outerHeight();
             var imgWidth = $currentImg.outerWidth();
+
 
             // --- 定位 dragpoint ---
             $dragPoint.css({
@@ -6801,8 +7953,8 @@ _e(function (E, $) {
             var left = imgLeft;
             var marginLeft = 0;
 
-            var txtTop = $txt.position().top;
-            var txtHeight = $txt.outerHeight();
+            var txtTop = $currentTxt.position().top;
+            var txtHeight = $currentTxt.outerHeight();
             if (top > (txtTop + txtHeight)) {
                 // top 不得超出编辑范围
                 top = txtTop + txtHeight;
@@ -6824,6 +7976,14 @@ _e(function (E, $) {
                 left: left,
                 'margin-left': marginLeft
             });
+            // 如果定位太靠左了
+            if (marginLeft < 0) {
+                // 得到三角形的margin-left
+                $toolbar.css('margin-left', '0');
+                $triangle.hide();
+            } else {
+                $triangle.show();
+            }
 
             // disable 菜单
             editor.disableMenusExcept();
@@ -6845,27 +8005,26 @@ _e(function (E, $) {
         }
 
         // 判断img是否是一个表情
-        var emotionConfig = editor.config.emotions;
         function isEmotion(imgSrc) {
             var result = false;
-            $.each(emotionConfig, function (k, conf) {
+            if (!editor.emotionUrls) {
+                return result;
+            }
+            $.each(editor.emotionUrls, function (index, url) {
                 var flag = false;
-                $.each(conf.imgs, function (idx, val) {
-                    if (imgSrc === val) {
-                        result = true;
-                        flag = true;
-                        return false;
-                    }
-                });
+                if (imgSrc === url) {
+                    result = true;
+                    flag = true;
+                }
                 if (flag) {
-                    return false;
+                    return false;  // break 循环
                 }
             });
             return result;
         }
 
         // click img 事件
-        $txt.on('mousedown', 'img', function (e) {
+        $currentTxt.on('mousedown', 'img', function (e) {
             e.preventDefault();
         }).on('click', 'img', function (e) {
             var $img = $(e.currentTarget);
@@ -6890,19 +8049,179 @@ _e(function (E, $) {
             $currentImg = $img;
             show();
 
+            // 默认显示menuContainer，其他默认隐藏
+            $menuContainer.show();
+            $linkInputContainer.hide();
+
             // 阻止冒泡
             e.preventDefault();
             e.stopPropagation();
             
-        }).on('click keypress scroll', function (e) {
-            setTimeout(hide, 100);
+        }).on('click keydown scroll', function (e) {
+            if (!isOnDrag) {
+                setTimeout(hide, 100);
+            }
         });
 
     });
 
-})(window, window.wangEditor, window.jQuery);
+});
+// 编辑区域 link toolbar
+_e(function (E, $) {
+    E.plugin(function () {
+        var editor = this;
+        var lang = editor.config.lang;
+        var $txt = editor.txt.$txt;
+
+        // 当前命中的链接
+        var $currentLink;
+
+        var $toolbar = $('<div class="txt-toolbar"></div>');
+        var $triangle = $('<div class="tip-triangle"></div>');
+        var $triggerLink = $('<a href="#" target="_blank"><i class="wangeditor-menu-img-link"></i> ' + lang.openLink + '</a>');
+        var isRendered;
+
+        // 记录当前的显示/隐藏状态
+        var isShow = false;
+
+        var showTimeoutId, hideTimeoutId;
+        var showTimeoutIdByToolbar, hideTimeoutIdByToolbar;
+
+        // 渲染 dom
+        function render() {
+            if (isRendered) {
+                return;
+            }
+
+            $toolbar.append($triangle)
+                    .append($triggerLink);
+
+            editor.$editorContainer.append($toolbar);
+
+            isRendered = true;
+        }
+
+        // 定位
+        function setPosition() {
+            if (!$currentLink) {
+                return;
+            }
+
+            var position = $currentLink.position();
+            var left = position.left;
+            var top = position.top;
+            var height = $currentLink.height();
+
+            // 初步计算top值
+            var topResult = top + height + 5;
+
+            // 判断 toolbar 是否超过了编辑器区域的下边界
+            var menuHeight = editor.menuContainer.height();
+            var txtHeight = editor.txt.$txt.outerHeight();
+            if (topResult > menuHeight + txtHeight) {
+                topResult = menuHeight + txtHeight + 5;
+            }
+
+            // 最终设置
+            $toolbar.css({
+                top: topResult,
+                left: left
+            });
+        }
+
+        // 显示 toolbar
+        function show() {
+            if (isShow) {
+                return;
+            }
+
+            if (!$currentLink) {
+                return;
+            }
+
+            render();
+
+            $toolbar.show();
+
+            // 设置链接
+            var href = $currentLink.attr('href');
+            $triggerLink.attr('href', href);
+
+            // 定位
+            setPosition();
+
+            isShow = true;
+        }
+
+        // 隐藏 toolbar
+        function hide() {
+            if (!isShow) {
+                return;
+            }
+
+            if (!$currentLink) {
+                return;
+            }
+
+            $toolbar.hide();
+            isShow = false;
+        }
+
+        // $txt 绑定事件
+        $txt.on('mouseenter', 'a', function (e) {
+            // 延时 500ms 显示toolbar
+            if (showTimeoutId) {
+                clearTimeout(showTimeoutId);
+            }
+            showTimeoutId = setTimeout(function () {
+                var a = e.currentTarget;
+                var $a = $(a);
+                $currentLink = $a;
+
+                var $img = $a.children('img');
+                if ($img.length) {
+                    // 该链接下包含一个图片
+
+                    // 图片点击时，隐藏toolbar
+                    $img.click(function (e) {
+                        hide();
+                    });
+
+                    if ($img.hasClass('clicked')) {
+                        // 图片还处于clicked状态，则不显示toolbar
+                        return;
+                    }
+                }
+
+                // 显示toolbar
+                show();
+            }, 500);
+        }).on('mouseleave', 'a', function (e) {
+            // 延时 500ms 隐藏toolbar
+            if (hideTimeoutId) {
+                clearTimeout(hideTimeoutId);
+            }
+            hideTimeoutId = setTimeout(hide, 500);
+        }).on('click keydown scroll', function (e) {
+            setTimeout(hide, 100);
+        });
+        // $toolbar 绑定事件
+        $toolbar.on('mouseenter', function (e) {
+            // 先中断掉 $txt.mouseleave 导致的隐藏
+            if (hideTimeoutId) {
+                clearTimeout(hideTimeoutId);
+            }
+        }).on('mouseleave', function (e) {
+            // 延时 500ms 显示toolbar
+            if (showTimeoutIdByToolbar) {
+                clearTimeout(showTimeoutIdByToolbar);
+            }
+            showTimeoutIdByToolbar = setTimeout(hide, 500);
+        });
+    });
+});
 // menu吸顶
-(function (window, E, $) {
+_e(function (E, $) {
 
     E.plugin(function () {
         var editor = this;
@@ -6919,14 +8238,13 @@ _e(function (E, $) {
         var $editorContainer = editor.$editorContainer;
         var editorTop = $editorContainer.offset().top;
         var editorHeight = $editorContainer.outerHeight();
-
+        
         var $menuContainer = editor.menuContainer.$menuContainer;
         var menuCssPosition = $menuContainer.css('position');
         var menuCssTop = $menuContainer.css('top');
-        var menuWidth = $menuContainer.width();
-        var menuHeight = $menuContainer.outerHeight();
         var menuTop = $menuContainer.offset().top;
-
+        var menuHeight = $menuContainer.outerHeight();
+        
         var $txt = editor.txt.$txt;
 
         E.$window.scroll(function () {
@@ -6935,7 +8253,19 @@ _e(function (E, $) {
                 return;
             }
 
-            var sTop = $(window).scrollTop();
+            var sTop = E.$window.scrollTop();
+
+            // 需要重新计算宽度，因为浏览器可能此时出现滚动条
+            var menuWidth = $menuContainer.width();
+
+            // 如果 menuTop === 0 说明此前编辑器一直隐藏，后来显示出来了，要重新计算相关数据
+            if (menuTop === 0) {
+                menuTop = $menuContainer.offset().top;
+                editorTop = $editorContainer.offset().top;
+                editorHeight = $editorContainer.outerHeight();
+                menuHeight = $menuContainer.outerHeight();
+            }
+
             if (sTop >= menuTop && sTop + menuFixed + menuHeight + 30 < editorTop + editorHeight) {
                 // 吸顶
                 $menuContainer.css({
@@ -6950,6 +8280,11 @@ _e(function (E, $) {
                 E.$body.css({
                     'margin-top': bodyMarginTop + menuHeight
                 });
+
+                // 记录
+                if (!editor._isMenufixed) {
+                    editor._isMenufixed = true;
+                }
             } else {
                 // 取消吸顶
                 $menuContainer.css({
@@ -6964,13 +8299,18 @@ _e(function (E, $) {
                 E.$body.css({
                     'margin-top': bodyMarginTop
                 });
+
+                // 撤销记录
+                if (editor._isMenufixed) {
+                    editor._isMenufixed = false;
+                }
             }
         });
     });
 
-})(window, window.wangEditor, window.jQuery);
+});
 // 缩进 菜单插件
-(function (E, $) {
+_e(function (E, $) {
 
     // 用 createMenu 方法创建菜单
     E.createMenu(function (check) {
@@ -7063,9 +8403,9 @@ _e(function (E, $) {
         editor.menus[menuId] = menu;
     });
 
-})(window.wangEditor, window.jQuery);
+});
 // 行高 菜单插件
-(function (E, $) {
+_e(function (E, $) {
 
     // 用 createMenu 方法创建菜单
     E.createMenu(function (check) {
@@ -7126,9 +8466,47 @@ _e(function (E, $) {
 
     });
 
-})(window.wangEditor, window.jQuery);
+});
+// 自定义上传
+_e(function (E, $) {
+
+    E.plugin(function () {
+
+        var editor = this;
+        var customUpload = editor.config.customUpload;
+        if (!customUpload) {
+            return;
+        } else if (editor.config.uploadImgUrl) {
+            alert('自定义上传无效，详看浏览器日志console.log');
+            E.error('已经配置了 uploadImgUrl ，就不能再配置 customUpload ，两者冲突。将导致自定义上传无效。');
+            return;
+        }
+
+        var $uploadContent = editor.$uploadContent;
+        if (!$uploadContent) {
+            E.error('自定义上传，无法获取 editor.$uploadContent');
+        }
+
+        // UI
+        var $uploadIcon = $('<div class="upload-icon-container"><i class="wangeditor-menu-img-upload"></i></div>');
+        $uploadContent.append($uploadIcon);
+
+        // 设置id，并暴露
+        var btnId = 'upload' + E.random();
+        var containerId = 'upload' + E.random();
+        $uploadIcon.attr('id', btnId);
+        $uploadContent.attr('id', containerId);
+
+        editor.customUploadBtnId = btnId;
+        editor.customUploadContainerId = containerId;
+    });
+
+});
 // 版权提示
 _e(function (E, $) {
     E.info('本页面富文本编辑器由 wangEditor 提供 http://wangeditor.github.io/ ');
 });
+    
+    // 最终返回wangEditor构造函数
+    return window.wangEditor;
 });

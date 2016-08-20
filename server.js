@@ -10,9 +10,10 @@ var path = require('path');
 
 // 文件将要上传到哪个文件夹下面
 var uploadfoldername = 'uploadfiles';
-var uploadfolderpath = __dirname + '/' + uploadfoldername;
+var uploadfolderpath = path.join(__dirname, uploadfoldername);
 
-// var server = '192.168.1.2';
+// var server = '192.168.1.5';
+// var server = '172.22.145.3';
 var server = 'localhost';
 var port = 8011;
 
@@ -34,6 +35,11 @@ http.createServer(function (req, res) {
 			}
 
 			console.log('formidable, form.parse ok');
+
+			// 显示参数，例如 token
+			console.log('显示上传时的参数 begin');
+			console.log(fields);
+			console.log('显示上传时的参数 end');
 
 			var item;
 
@@ -67,7 +73,7 @@ http.createServer(function (req, res) {
 				filename = Math.random().toString().slice(2) + extname;
 
 				// 构建将要存储的文件的路径
-				var filenewpath = uploadfolderpath + '/' + filename;
+				var filenewpath = path.join(uploadfolderpath, filename);
 
 				// 将临时文件保存为正式的文件
 				fs.rename(tempfilepath, filenewpath, function (err) {
